@@ -16,11 +16,15 @@ namespace VoyageForge.Bridge.Runtime
     /// 负责：端点 baseUrl 拼接、全局请求头合并、请求/响应拦截器链、
     /// UnityWebRequest 发送、失败归一化与响应体反序列化。
     /// 派生类只需要提供配置来源（<see cref="ConfigProvider"/>）与默认端点键（<see cref="urlKey"/>）。
+    ///
+    /// 这是**应用侧**（宿主工程）使用的类型：每个应用实现自己的客户端（如 WebClient）。
+    /// **依赖 Bridge 的第三方包不要在自己的包里声明本类的子类**——那会与宿主的客户端重复并各自加载一份配置；
+    /// 包应当通过静态门面 <see cref="BridgeHub"/> 调用，本类型首次实例化时会自动登记到该门面。
     /// </summary>
     /// <typeparam name="T">
     /// 派生类型自身。每个封闭泛型类型拥有各自的单例与静态拦截器列表，因此不同服务互不干扰。
     /// </typeparam>
-    public abstract class BridgeClient<T> : Singleton<T> where T : BridgeClient<T>, new()
+    public abstract class BridgeClient<T> : Singleton<T>, IBridgeClient where T : BridgeClient<T>, new()
     {
         /// <summary>
         /// 配置提供器：决定当前环境与端点地址从何处加载（Resources 资产、StreamingAssets JSON 等）。
@@ -52,9 +56,24 @@ namespace VoyageForge.Bridge.Runtime
         protected virtual string urlKey => "default";
 
         /// <summary>
+        /// <see cref="IBridgeClient"/> 实现：把默认端点键暴露给 <see cref="BridgeHub"/>（第三方包）使用。
+        /// 这里用显式实现，避免在公开 API 上再增加一个与 <see cref="UrlKey"/> 语义重复的成员。
+        /// </summary>
+        string IBridgeClient.DefaultEndpointKey => urlKey;
+
+        /// <summary>
         /// 请求失败时触发（网络异常、超时、取消、非 2xx 结果、JSON 反序列化失败），参数为错误描述。
         /// </summary>
         public event Action<string> OnError;
+
+        /// <summary>
+        /// 单例实例创建后自动把自己登记为 <see cref="BridgeHub"/> 的默认客户端（先到先得，只在没有默认客户端时生效）。
+        /// 这样第三方包无需知道宿主客户端的具体类型即可发请求；只是"读取单例"就会触发这次登记。
+        /// </summary>
+        protected override void Initialize()
+        {
+            BridgeHub.TrySetDefaultClient(this);
+        }
 
         /// <summary>
         /// 读取当前环境下指定端点的基础地址；<paramref name="key"/> 为空时使用默认端点键。
@@ -104,24 +123,35 @@ namespace VoyageForge.Bridge.Runtime
         // ======================== 核心发送方法 ========================
 
         /// <summary>
-        /// 核心异步请求：
+        /// <see cref="IBridgeClient"/> 的显式实现：第三方包通过 <see cref="BridgeHub"/> 调到实例管线。
+        /// </summary>
+        UniTask<Response<R>> IBridgeClient.SendAsync<R>(Request request) => SendCoreAsync<R>(request);
+
+        /// <summary>
+        /// 核心异步请求（实例管线）：
         /// 解析端点键 → 拼接 baseUrl → 合并请求头 → 执行请求拦截器 → 发送 →
         /// 归一化失败结果 / 反序列化响应体 → 执行响应拦截器。
         /// 该方法不会向外抛出网络异常，所有失败都以 <see cref="Response{T}"/> 形式返回（statusCode 为 0 或原始状态码）。
         /// </summary>
+        /// <remarks>
+        /// 之所以叫 SendCoreAsync 而不是把发送逻辑直接做成公开实例方法：
+        /// C# 不允许"静态成员与实例成员仅以 static 区分"的重载，
+        /// 而 <see cref="SendAsync{R}(Request)"/> 这个静态入口必须为既有调用方保留。
+        /// 因此管线放在私有实例方法里，由静态入口、<see cref="IBridgeClient"/> 与 <see cref="BridgeHub"/> 共同复用。
+        /// </remarks>
         /// <typeparam name="R">响应体反序列化目标类型；传 string 时直接返回原始响应文本。</typeparam>
         /// <param name="request">请求参数。注意：url 会被补全为完整地址，headers 字典会被就地合并全局请求头。</param>
-        public static async UniTask<Response<R>> SendAsync<R>(Request request) where R : class
+        private async UniTask<Response<R>> SendCoreAsync<R>(Request request) where R : class
         {
             // 1. 解析本次请求使用的端点键。
-            //    请求未指定时回退到子类的默认端点键（urlKey）。
+            //    请求未指定时回退到本客户端的默认端点键（urlKey）。
             //    历史上这里误用了配置的环境键（EnvironmentKey），导致 "不指定端点就请求失败"。
-            string endpointKey = string.IsNullOrWhiteSpace(request.endpointKey) ? UrlKey : request.endpointKey;
+            string endpointKey = string.IsNullOrWhiteSpace(request.endpointKey) ? urlKey : request.endpointKey;
 
             // 2. BaseURL：相对路径拼接所选端点的 baseUrl；
             //    完整 URL（http 开头，忽略大小写）直接请求，不做任何拼接。
             if (!request.url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                request.url = Instance.Config.GetBaseUrl(endpointKey).TrimEnd('/') + "/" + request.url.TrimStart('/');
+                request.url = Config.GetBaseUrl(endpointKey).TrimEnd('/') + "/" + request.url.TrimStart('/');
 
             // 3. Headers：请求头为空则新建，再把全局默认头补齐（同名不覆盖请求自身设置的值）。
             request.headers ??= new Dictionary<string, string>();
@@ -182,7 +212,8 @@ namespace VoyageForge.Bridge.Runtime
                     errorResponse.statusText = webEx.UnityWebRequest.result.ToString();
                 }
 
-                Instance.OnError?.Invoke(ex.Message);
+                // 用实例事件而不是 Instance.OnError：即使单例已被 Destroy，这里也不会再抛 NullReferenceException。
+                OnError?.Invoke(ex.Message);
                 return errorResponse;
             }
 
@@ -196,7 +227,7 @@ namespace VoyageForge.Bridge.Runtime
 
             if (uwr.result != UnityWebRequest.Result.Success)
             {
-                Instance.OnError?.Invoke(uwr.error);
+                OnError?.Invoke(uwr.error);
                 return response;
             }
 
@@ -217,7 +248,7 @@ namespace VoyageForge.Bridge.Runtime
         /// </summary>
         /// <typeparam name="R">目标类型。</typeparam>
         /// <param name="text">响应文本，可能为 null。</param>
-        private static R DeserializeBody<R>(string text) where R : class
+        private R DeserializeBody<R>(string text) where R : class
         {
             // 目标类型就是 string 时无需 JSON 解析，直接返回原始文本。
             if (typeof(R) == typeof(string))
@@ -229,7 +260,7 @@ namespace VoyageForge.Bridge.Runtime
             }
             catch (Exception ex)
             {
-                Instance.OnError?.Invoke($"JSON 反序列化失败: {ex.Message}\n响应文本: {text}");
+                OnError?.Invoke($"JSON 反序列化失败: {ex.Message}\n响应文本: {text}");
                 return null;
             }
         }
@@ -242,7 +273,7 @@ namespace VoyageForge.Bridge.Runtime
         /// <typeparam name="R">最终响应体的目标类型。</typeparam>
         /// <param name="response">待回写的最终响应对象。</param>
         /// <param name="originalText">反序列化时使用的原始响应文本，用于判断拦截器是否改写了响应体。</param>
-        private static void ApplyResponseInterceptors<R>(Response<R> response, string originalText) where R : class
+        private void ApplyResponseInterceptors<R>(Response<R> response, string originalText) where R : class
         {
             // 没有拦截器时不做任何包装，避免无谓的分配。
             if (responseInterceptors.Count == 0) return;
@@ -276,14 +307,25 @@ namespace VoyageForge.Bridge.Runtime
             }
         }
 
-        // ======================== 快捷方法 ========================
+        // ======================== 静态便捷入口（向后兼容） ========================
+
+        /// <summary>
+        /// 核心异步请求（静态入口，内部转发到当前单例的实例管线）。
+        /// 保留该静态入口是为了兼容既有调用方；第三方包发请求请用 <see cref="BridgeHub"/>。
+        /// 行为说明：解析端点键 → 拼接 baseUrl → 合并 headers → 执行拦截器链 → 发送 → 反序列化。
+        /// 该方法不会向外抛出网络异常，所有失败都以 <see cref="Response{T}"/> 形式返回。
+        /// </summary>
+        /// <typeparam name="R">响应体反序列化目标类型；传 string 时直接返回原始响应文本。</typeparam>
+        /// <param name="request">请求参数（url 与 headers 会被就地补全）。</param>
+        public static UniTask<Response<R>> SendAsync<R>(Request request) where R : class
+            => Instance.SendCoreAsync<R>(request);
 
         /// <summary>GET 请求（使用默认端点）。</summary>
         public static UniTask<Response<R>> GetAsync<R>(string url, Dictionary<string, string> headers = null,
             int timeoutSeconds = 30, CancellationToken cancellationToken = default) where R : class
         {
-            var req = BuildRequest(url, "GET", null, headers, timeoutSeconds, cancellationToken);
-            return SendAsync<R>(req);
+            var req = BridgeRequestFactory.Create(url, "GET", null, headers, timeoutSeconds, cancellationToken);
+            return Instance.SendCoreAsync<R>(req);
         }
 
         /// <summary>GET 请求（指定端点）。</summary>
@@ -291,8 +333,8 @@ namespace VoyageForge.Bridge.Runtime
             Dictionary<string, string> headers = null, int timeoutSeconds = 30,
             CancellationToken cancellationToken = default) where R : class
         {
-            var req = BuildRequest(url, "GET", null, headers, timeoutSeconds, cancellationToken, endpointKey);
-            return SendAsync<R>(req);
+            var req = BridgeRequestFactory.Create(url, "GET", null, headers, timeoutSeconds, cancellationToken, endpointKey);
+            return Instance.SendCoreAsync<R>(req);
         }
 
         /// <summary>POST 请求（使用默认端点）。</summary>
@@ -300,8 +342,8 @@ namespace VoyageForge.Bridge.Runtime
             Dictionary<string, string> headers = null, int timeoutSeconds = 30,
             CancellationToken cancellationToken = default) where R : class
         {
-            var req = BuildRequest(url, "POST", bodyJson, headers, timeoutSeconds, cancellationToken);
-            return SendAsync<R>(req);
+            var req = BridgeRequestFactory.Create(url, "POST", bodyJson, headers, timeoutSeconds, cancellationToken);
+            return Instance.SendCoreAsync<R>(req);
         }
 
         /// <summary>POST 请求（指定端点）。</summary>
@@ -309,8 +351,8 @@ namespace VoyageForge.Bridge.Runtime
             Dictionary<string, string> headers = null, int timeoutSeconds = 30,
             CancellationToken cancellationToken = default) where R : class
         {
-            var req = BuildRequest(url, "POST", bodyJson, headers, timeoutSeconds, cancellationToken, endpointKey);
-            return SendAsync<R>(req);
+            var req = BridgeRequestFactory.Create(url, "POST", bodyJson, headers, timeoutSeconds, cancellationToken, endpointKey);
+            return Instance.SendCoreAsync<R>(req);
         }
 
         /// <summary>PUT 请求（使用默认端点）。</summary>
@@ -318,8 +360,8 @@ namespace VoyageForge.Bridge.Runtime
             Dictionary<string, string> headers = null, int timeoutSeconds = 30,
             CancellationToken cancellationToken = default) where R : class
         {
-            var req = BuildRequest(url, "PUT", bodyJson, headers, timeoutSeconds, cancellationToken);
-            return SendAsync<R>(req);
+            var req = BridgeRequestFactory.Create(url, "PUT", bodyJson, headers, timeoutSeconds, cancellationToken);
+            return Instance.SendCoreAsync<R>(req);
         }
 
         /// <summary>PUT 请求（指定端点）。</summary>
@@ -327,16 +369,16 @@ namespace VoyageForge.Bridge.Runtime
             Dictionary<string, string> headers = null, int timeoutSeconds = 30,
             CancellationToken cancellationToken = default) where R : class
         {
-            var req = BuildRequest(url, "PUT", bodyJson, headers, timeoutSeconds, cancellationToken, endpointKey);
-            return SendAsync<R>(req);
+            var req = BridgeRequestFactory.Create(url, "PUT", bodyJson, headers, timeoutSeconds, cancellationToken, endpointKey);
+            return Instance.SendCoreAsync<R>(req);
         }
 
         /// <summary>DELETE 请求（使用默认端点）。</summary>
         public static UniTask<Response<R>> DeleteAsync<R>(string url, Dictionary<string, string> headers = null,
             int timeoutSeconds = 30, CancellationToken cancellationToken = default) where R : class
         {
-            var req = BuildRequest(url, "DELETE", null, headers, timeoutSeconds, cancellationToken);
-            return SendAsync<R>(req);
+            var req = BridgeRequestFactory.Create(url, "DELETE", null, headers, timeoutSeconds, cancellationToken);
+            return Instance.SendCoreAsync<R>(req);
         }
 
         /// <summary>DELETE 请求（指定端点）。</summary>
@@ -344,36 +386,8 @@ namespace VoyageForge.Bridge.Runtime
             Dictionary<string, string> headers = null, int timeoutSeconds = 30,
             CancellationToken cancellationToken = default) where R : class
         {
-            var req = BuildRequest(url, "DELETE", null, headers, timeoutSeconds, cancellationToken, endpointKey);
-            return SendAsync<R>(req);
-        }
-
-        /// <summary>
-        /// 构造请求对象。
-        /// 这里刻意不对 endpointKey 做兜底：留 null 交由 <see cref="SendAsync{R}"/> 统一回退到
-        /// 默认端点键（<see cref="urlKey"/>），保证"默认端点"只有一个判定入口。
-        /// </summary>
-        /// <param name="url">请求地址（相对路径或完整 URL）。</param>
-        /// <param name="method">HTTP 方法。</param>
-        /// <param name="bodyJson">请求体 JSON，可为 null。</param>
-        /// <param name="headers">请求头，可为 null。</param>
-        /// <param name="timeoutSeconds">超时秒数。</param>
-        /// <param name="cancellationToken">取消令牌。</param>
-        /// <param name="endpointKey">端点键；null 表示使用默认端点。</param>
-        private static Request BuildRequest(string url, string method, string bodyJson,
-            Dictionary<string, string> headers, int timeoutSeconds, CancellationToken cancellationToken,
-            string endpointKey = null)
-        {
-            return new Request
-            {
-                url = url,
-                method = method,
-                bodyJson = bodyJson,
-                headers = headers,
-                timeoutSeconds = timeoutSeconds,
-                endpointKey = endpointKey,
-                cancellationToken = cancellationToken == default ? CancellationToken.None : cancellationToken
-            };
+            var req = BridgeRequestFactory.Create(url, "DELETE", null, headers, timeoutSeconds, cancellationToken, endpointKey);
+            return Instance.SendCoreAsync<R>(req);
         }
     }
 }

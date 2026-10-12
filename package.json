@@ -29,6 +29,11 @@
       "displayName": "Basic",
       "description": "Demonstrates BridgeClient multi-endpoint usage with default endpoint, custom endpoint, and full URL scenarios.",
       "path": "Samples~/Basic"
+    },
+    {
+      "displayName": "BridgeHub",
+      "description": "Demonstrates how a package that depends on Bridge calls Web APIs through the static BridgeHub facade: a package-style static API wrapper plus the app-side client that registers itself automatically.",
+      "path": "Samples~/BridgeHub"
     }
   ]
 }

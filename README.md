@@ -18,6 +18,9 @@ Bridge 是 VoyageForge 的 Unity 通信连接模块，用来统一连接本地�
 - `Runtime/Scripts/Config/EndpointConfig.cs` — 单条端点配置（环境键 + 端点键 + 地址）。
 - `Runtime/Scripts/Config/JsonBridgeConfigProvider.cs` — 从 StreamingAssets 读取 JSON 配置的提供器。
 - `Runtime/Scripts/Config/BridgeConfigProviderFactory.cs` — 按类型名反射创建配置提供器。
+- `Runtime/Scripts/BridgeHub.cs` — 第三方包调用 Bridge 的统一静态门面（见下文「作为依赖库使用 Bridge」）。
+- `Runtime/Scripts/IBridgeClient.cs` — 非泛型客户端契约；包与测试面向它编程，而不是某个具体客户端类型。
+- `Runtime/Scripts/BridgeNotInitializedException.cs` — 尚未登记客户端时的明确异常（带处理指引）。
 
 ### Editor
 - `Editor/Scripts/BridgeSettingsProvider.cs` — Bridge 的 Project Settings 面板实现（只负责界面构建与交互）。
@@ -29,10 +32,15 @@ Bridge 是 VoyageForge 的 Unity 通信连接模块，用来统一连接本地�
 
 ### Samples
 - `Samples~/Basic/` — 示例项目，包含完整的 WebClient 实现和多端点测试用例。
+- `Samples~/BridgeHub/` — 演示「第三方包依赖 Bridge」的用法：包只写静态封装（走 `BridgeHub`），
+  应用侧提供客户端并自动登记；含示例配置、演示入口与说明文档。
 - 在 Package Manager 中点击 Import 即可导入到 `Assets/Samples/` 目录。
 
 ### Tests
-- `Tests/Runtime/` — PlayMode 测试，覆盖完整 URL、默认端点（urlKey 解析）、自定义端点、响应拦截器回写四种场景。
+- `Tests/Runtime/` — PlayMode 测试，覆盖：完整 URL / 默认端点（urlKey 解析）/ 自定义端点 / 响应拦截器回写 /
+  BridgeHub（客户端自动登记、先到先得、显式覆盖、未初始化异常、请求确实经由登记的客户端发出）。
+- 超时类用例只断言可判定的不变量（成功必须越过 60 秒才说明没有硬限制；无法判定时标 Inconclusive），
+  不把断言绑死在服务端 drip 的精确时长上。
 - 测试直接访问公网地址（jsonplaceholder.typicode.com / httpbin.org），离线环境下会失败。
 
 ## 配置规则
@@ -101,6 +109,54 @@ var response = await WebClient.GetAsync<StatusDto>("api/status", "webapi");
 var response = await WebClient.GetAsync<PostDto>("https://jsonplaceholder.typicode.com/posts/1");
 ```
 
+## 作为依赖库使用 Bridge（第三方包）
+
+如果某个 Unity 包依赖 Bridge 来调用 Web API，请遵守一条规则：
+
+> **包内不要声明 `BridgeClient<T>` 子类，也不要 `new` 宿主的客户端。**
+> 每个应用只应有一个（或少数几个）自己的客户端；包再声明一个会导致配置被重复加载、
+> 环境切换不一致，并且和宿主的客户端冲突。
+
+包只需要写静态封装函数，统一通过 `BridgeHub` 调用：
+
+```csharp
+using System.Threading;
+using Cysharp.Threading.Tasks;
+using VoyageForge.Bridge.Runtime;
+
+public static class OrderApi
+{
+    private const string EndpointKey = "orders";   // 包自己约定的端点键
+
+    public static UniTask<Response<OrderDto>> GetOrderAsync(int id, CancellationToken ct = default)
+        => BridgeHub.GetAsync<OrderDto>($"api/orders/{id}", EndpointKey, cancellationToken: ct);
+}
+```
+
+应用侧（使用该包的工程）需要做的事：
+
+- 实现至少一个 `BridgeClient<T>` 子类（例如自己的 `WebClient`），或直接导入 `Samples~/Basic` 示例；
+- 想直接看可运行的完整示例，导入 `Samples~/BridgeHub`：包含「包侧静态封装」与「应用侧客户端」两侧代码、
+  自带示例配置与演示入口；
+- 该客户端**首次被使用**时会自动登记为 `BridgeHub` 的默认客户端，包的调用即可生效；
+- 应用若有多个客户端、需要指定包用哪一个，显式指定一次即可（不指定则「先被实例化的客户端」胜出）：
+
+```csharp
+BridgeHub.SetDefaultClient(AdminClient.Instance);
+```
+
+尚未登记时，包的调用会**同步抛出** `BridgeNotInitializedException`，提示信息直接说明应用侧需要做什么，
+不会静默失败或抛 NullReferenceException。
+
+补充说明：
+
+- 包的请求最终由宿主客户端发出，因此宿主的 `DefaultHeaders` 与请求/响应拦截器（例如统一加鉴权头）
+  会自动作用于包的请求。
+- 包要自定义请求头时按调用传 `headers` 即可，不必也不应该去改宿主的拦截器链。
+- `Samples~/Basic` 中的 `BridgeBootstrap.cs` 会在运行时启动阶段触碰一次示例客户端完成登记，
+  因此「导入示例即可开箱使用」。
+- 单元测试里可用 `BridgeHub.ClearDefaultClient()` 复位全局状态。
+
 ## API 参考
 
 ### 核心请求
@@ -121,6 +177,24 @@ var response = await WebClient.GetAsync<PostDto>("https://jsonplaceholder.typico
 | `PutAsync<R>(url, bodyJson, endpointKey, headers?, timeout?, ct?)` | PUT + 指定端点 |
 | `DeleteAsync<R>(url, headers?, timeout?, ct?)` | DELETE 请求 |
 | `DeleteAsync<R>(url, endpointKey, headers?, timeout?, ct?)` | DELETE + 指定端点 |
+
+### BridgeHub（第三方包调用入口）
+
+静态门面，供依赖 Bridge 的包使用。请求方法与 `BridgeClient<T>` 的同名静态方法签名一致
+（`GetAsync` / `PostAsync` / `PutAsync` / `DeleteAsync` 各带「不带 endpointKey」与「带 endpointKey」两种重载），
+统一返回 `UniTask<Response<R>>`。
+
+| 成员 | 说明 |
+|------|------|
+| `Current` / `HasClient` | 当前登记的客户端 / 是否已登记 |
+| `TrySetDefaultClient(client)` | 仅在没有默认客户端时登记（客户端首次实例化会自动调用，先到先得） |
+| `SetDefaultClient(client)` | 显式指定或替换默认客户端（多客户端场景）；传 null 抛 `ArgumentNullException` |
+| `ClearDefaultClient()` | 清空默认客户端（测试复位用） |
+| `SendAsync<R>(Request)` | 核心发送入口 |
+| `GetAsync` / `PostAsync` / `PutAsync` / `DeleteAsync` | 便捷方法，签名与 `BridgeClient<T>` 的同名静态方法一致 |
+
+未登记客户端时**同步抛出** `BridgeNotInitializedException`。用法与前提见上文
+「作为依赖库使用 Bridge（第三方包）」。
 
 ### 拦截器
 
@@ -202,6 +276,8 @@ var request = new Request
 - 相对路径自动拼接当前端点的 baseUrl；完整 URL（`http` 开头）直接请求，不拼接。
 - 「默认端点键」只有一个判定入口：`BridgeClient<T>.urlKey`。请求未设置 `endpointKey`（null/空白）时使用它，
   绝不会把**环境键**当作端点键使用。
+- 第三方包不声明 `BridgeClient<T>` 子类，统一通过静态门面 `BridgeHub` 调用；客户端首次实例化时自动登记，
+  「谁是宿主的客户端」由应用侧决定，包只依赖 `IBridgeClient` 这个非泛型契约。
 - 环境与端点的增删改统一走 `IBridgeConfig` 的编辑方法（`AddEnvironment` / `RemoveEnvironment` /
   `AddEndpoint` / `SetEndpoint` / `RemoveEndpoint`），由配置实现类统一保证去空白、去重、`dev` 保留并置顶等规则。
 - 如果项目后续扩展新的服务类型，优先新增端点键，而不是继续堆叠专用字段。
@@ -211,5 +287,7 @@ var request = new Request
 - 建议项目中只保留一份主配置资源，避免搜索到多份配置时产生歧义。
 - 编辑器侧的所有入口（Project Settings 面板、菜单、环境快捷切换窗口）统一通过 `BridgeConfigEditorAccess`
   读写配置，保证「改的就是运行时读的那一份」；新增编辑器入口时请沿用该入口，不要直接操作配置列表。
+- 新增第三方包时，包内**不要声明 `BridgeClient<T>` 子类**，统一用 `BridgeHub` 调用
+  （见「作为依赖库使用 Bridge（第三方包）」）。
 - 通过 `BridgeClient<T>` 泛型单例模式，不同服务可继承各自独立的客户端实例；
   拦截器链与 `DefaultHeaders` 按泛型类型各自独立，互不影响。

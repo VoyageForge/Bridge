@@ -1,6 +1,6 @@
 {
   "name": "com.voyageforge.bridge",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "displayName": "Bridge",
   "description": "Voyage Bridge is a Unity connectivity toolkit for managing environments, endpoints, and remote service access across local and server-side workflows.",
   "unity": "2022.3",
@@ -19,7 +19,7 @@
     "url": "https://github.com/VoyageForge/Bridge"
   },
   "dependencies": {
-    "com.voyageforge.depot": "0.0.17",
+    "com.voyageforge.depot": "0.0.25",
     "com.unity.nuget.newtonsoft-json": "3.2.2",
     "com.cysharp.unitask": "2.5.11"
   },

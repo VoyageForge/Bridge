@@ -1,4 +1,8 @@
-## v0.0.14
+## v0.0.15
+- chore(bridge): set version to 0.0.15
+- docs(bridge): 新增 BridgeHub 示例与依赖方接入说明
+- feat(bridge): 新增 BridgeHub 门面，客户端首次实例化自动登记
+- fix(bridge): 修复默认端点键解析与响应拦截器回写，统一编辑器配置数据源## v0.0.14
 - chore(bridge): set version to 0.0.14
 - feat(bridge): 适配 Depot UxmlUtility 命名空间并新增请求超时测试
 - Merge branch 'dev'

@@ -29,8 +29,8 @@ namespace VoyageForge.Bridge.Tests
             // 拦截器：替换响应体（原始文本）并改写状态描述。
             Func<Response<string>, Response<string>> interceptor = response =>
             {
-                response.data = RewrittenBody;
-                response.statusText = "intercepted";
+                response.Data = RewrittenBody;
+                response.StatusText = "intercepted";
                 return response;
             };
 
@@ -50,20 +50,20 @@ namespace VoyageForge.Bridge.Tests
 
                 var response = awaiter.GetResult();
                 Assert.IsNotNull(response);
-                Assert.IsTrue(response.IsSuccessStatusCode, $"StatusCode: {response.statusCode}");
+                Assert.IsTrue(response.IsSuccessStatusCode, $"StatusCode: {response.StatusCode}");
 
                 // 1) 拦截器改写后的文本被重新反序列化
-                Assert.IsNotNull(response.data, "拦截器改写响应体后应重新反序列化");
-                Assert.AreEqual("interceptor-rewritten", response.data.url);
+                Assert.IsNotNull(response.Data, "拦截器改写响应体后应重新反序列化");
+                Assert.AreEqual("interceptor-rewritten", response.Data.url);
 
                 // 2) RawText 与拦截器结果一致
                 Assert.AreEqual(RewrittenBody, response.RawText);
 
                 // 3) 状态描述回写生效
-                Assert.AreEqual("intercepted", response.statusText);
+                Assert.AreEqual("intercepted", response.StatusText);
 
                 // 4) HTTP 状态码仍来自真实响应
-                Assert.AreEqual(200, (int)response.statusCode);
+                Assert.AreEqual(200, (int)response.StatusCode);
             }
             finally
             {

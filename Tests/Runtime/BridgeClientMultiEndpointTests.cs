@@ -23,10 +23,10 @@ namespace VoyageForge.Bridge.Tests
 
             var response = awaiter.GetResult();
             Assert.IsNotNull(response);
-            Assert.IsTrue(response.IsSuccessStatusCode, $"StatusCode: {response.statusCode}");
-            Assert.IsNotNull(response.data);
+            Assert.IsTrue(response.IsSuccessStatusCode, $"StatusCode: {response.StatusCode}");
+            Assert.IsNotNull(response.Data);
             // 兼容 JSON 格式化（可能带空格）
-            Assert.IsTrue(response.data.Contains("\"id\": 1") || response.data.Contains("\"id\":1"), $"Response missing 'id:1': {response.data}");
+            Assert.IsTrue(response.Data.Contains("\"id\": 1") || response.Data.Contains("\"id\":1"), $"Response missing 'id:1': {response.Data}");
         }
 
         /// <summary>
@@ -43,8 +43,8 @@ namespace VoyageForge.Bridge.Tests
             var response = awaiter.GetResult();
             Assert.IsNotNull(response);
             Assert.IsTrue(response.IsSuccessStatusCode);
-            Assert.IsNotNull(response.data);
-            Assert.IsTrue(response.data.Contains("\"id\": 1") || response.data.Contains("\"id\":1"));
+            Assert.IsNotNull(response.Data);
+            Assert.IsTrue(response.Data.Contains("\"id\": 1") || response.Data.Contains("\"id\":1"));
         }
 
         /// <summary>自定义端点请求：显式指定 endpointKey = "webapi"。</summary>
@@ -58,9 +58,9 @@ namespace VoyageForge.Bridge.Tests
             var response = awaiter.GetResult();
             Assert.IsNotNull(response);
             Assert.IsTrue(response.IsSuccessStatusCode);
-            Assert.IsNotNull(response.data);
+            Assert.IsNotNull(response.Data);
             // 检查包含 "url" 字段和 "httpbin.org"
-            Assert.IsTrue(response.data.Contains("\"url\"") && response.data.Contains("httpbin.org"), $"Response missing url or host: {response.data}");
+            Assert.IsTrue(response.Data.Contains("\"url\"") && response.Data.Contains("httpbin.org"), $"Response missing url or host: {response.Data}");
         }
 
         // [UnityTest]
@@ -83,7 +83,7 @@ namespace VoyageForge.Bridge.Tests
         //     var response = awaiter.GetResult();
         //     Assert.IsNotNull(response);
         //     Assert.IsFalse(response.IsSuccessStatusCode, "Should fail due to timeout");
-        //     Assert.IsNull(response.data);
+        //     Assert.IsNull(response.Data);
         // }
         //
         // [UnityTest]
@@ -106,11 +106,11 @@ namespace VoyageForge.Bridge.Tests
         //
         //     var response = awaiter.GetResult();
         //     Assert.IsNotNull(response);
-        //     Assert.IsTrue(response.IsSuccessStatusCode, $"StatusCode: {response.statusCode}, StatusText: {response.statusText}");
-        //     Assert.IsNotNull(response.data);
+        //     Assert.IsTrue(response.IsSuccessStatusCode, $"StatusCode: {response.StatusCode}, StatusText: {response.StatusText}");
+        //     Assert.IsNotNull(response.Data);
         //
         //     // 验证响应是包含 'url' 字段的 JSON（httpbin /delay 返回的就是 /get 的响应）
-        //     Assert.IsTrue(response.data.Contains("\"url\"") && response.data.Contains("httpbin.org"), $"Response missing url or host: {response.data}");
+        //     Assert.IsTrue(response.Data.Contains("\"url\"") && response.Data.Contains("httpbin.org"), $"Response missing url or host: {response.Data}");
         // }
 
 
@@ -142,12 +142,12 @@ namespace VoyageForge.Bridge.Tests
 
             var response = awaiter.GetResult();
             Assert.IsNotNull(response);
-            Assert.IsTrue(response.IsSuccessStatusCode, $"StatusCode: {response.statusCode}");
-            Assert.IsNotNull(response.data);
+            Assert.IsTrue(response.IsSuccessStatusCode, $"StatusCode: {response.StatusCode}");
+            Assert.IsNotNull(response.Data);
 
             // 验证返回的是有效 JSON（包含 "url" 字段）
-            Assert.IsTrue(response.data.Contains("\"url\""),
-                $"Response missing 'url' field: {response.data}");
+            Assert.IsTrue(response.Data.Contains("\"url\""),
+                $"Response missing 'url' field: {response.Data}");
         }
     }
 }

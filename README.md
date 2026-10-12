@@ -12,7 +12,7 @@ Bridge 是 VoyageForge 的 Unity 通信连接模块，用来统一连接本地�
 - `Runtime/Scripts/IBridgeConfigProvider.cs` — Bridge 配置提供器接口，允许项目按需决定配置的加载方式。
 - `Runtime/Scripts/BridgeClient.cs` — Bridge 核心运行时入口，抽象泛型单例基类，提供 **UniTask 异步（Wait）模式**、请求/响应拦截器链、多端点支持。
 - `Runtime/Scripts/Request.cs` — 请求数据模型，支持 url、method、bodyJson、headers、timeoutSeconds、endpointKey、cancellationToken。
-- `Runtime/Scripts/Response.cs` — 响应数据容器，包含 data、statusCode、statusText、headers、RawText。
+- `Runtime/Scripts/Response.cs` — 响应数据容器，包含 Data、StatusCode、StatusText、Headers、RawText 与 IsSuccessStatusCode。
 - `Runtime/Scripts/Config/BridgeConfigAsset.cs` — ScriptableObject 形式的 Bridge 配置资源，负责环境与端点地址管理。
 - `Runtime/Scripts/Config/BridgeConfig.cs` — 纯 C#（JSON）形式的配置实现，行为与 BridgeConfigAsset 一致。
 - `Runtime/Scripts/Config/EndpointConfig.cs` — 单条端点配置（环境键 + 端点键 + 地址）。
@@ -178,6 +178,21 @@ BridgeHub.SetDefaultClient(AdminClient.Instance);
 | `DeleteAsync<R>(url, headers?, timeout?, ct?)` | DELETE 请求 |
 | `DeleteAsync<R>(url, endpointKey, headers?, timeout?, ct?)` | DELETE + 指定端点 |
 
+### Response&lt;T&gt;
+
+| 成员 | 说明 |
+|------|------|
+| `Data` | 响应体：DTO 的反序列化结果；`R` 为 `string` 时即原始文本。失败 / 空响应体 / 反序列化失败时为 null |
+| `StatusCode` | HTTP 状态码（`HttpStatusCode` 枚举）；网络层失败（超时 / 取消 / 连接错误）为 0 |
+| `StatusText` | 状态描述：正常结束时来自 `UnityWebRequest.result`；抛异常时为异常类型名；取消 / 超时为 "Canceled" / "Timeout" |
+| `Headers` | 响应头；当前实现成功路径下是空字典（尚未从 UnityWebRequest 回填真实响应头） |
+| `RawText` | 未反序列化的原始响应文本，仅成功路径有值；被响应拦截器改写时同步刷新 |
+| `IsSuccessStatusCode` | 状态码是否落在 2xx 区间（网络层失败时为 false） |
+
+> 注意：自 v0.0.16 起这些成员由**公共字段**改为**属性**（PascalCase）。
+> 既有代码里的 `response.data` / `statusCode` / `statusText` / `headers` 需改为
+> `response.Data` / `StatusCode` / `StatusText` / `Headers`。
+
 ### BridgeHub（第三方包调用入口）
 
 静态门面，供依赖 Bridge 的包使用。请求方法与 `BridgeClient<T>` 的同名静态方法签名一致
@@ -201,8 +216,8 @@ BridgeHub.SetDefaultClient(AdminClient.Instance);
 请求拦截器在「URL 拼接、请求头合并」之后、发送之前执行，可修改 URL、方法、请求体、请求头。
 
 响应拦截器只在 HTTP 请求成功返回后执行，操作的是**原始文本形式**的响应（`Response<string>`）：
-修改 `statusCode`、`statusText`、`headers` 会直接体现在返回的响应上；
-修改 `data`（响应文本）时会按新文本重新反序列化，并同步更新 `RawText`。
+修改 `StatusCode`、`StatusText`、`Headers` 会直接体现在返回的响应上；
+修改 `Data`（响应文本）时会按新文本重新反序列化，并同步更新 `RawText`。
 
 ```csharp
 // 请求拦截器：修改请求参数
@@ -215,14 +230,14 @@ WebClient.UseRequestInterceptor(request =>
 // 响应拦截器：剥离服务端 envelope（示例：{"code":0,"data":{...}}），修改会被回写到最终响应
 WebClient.UseResponseInterceptor(response =>
 {
-    if (!string.IsNullOrEmpty(response.data))
+    if (!string.IsNullOrEmpty(response.Data))
     {
-        var envelope = JObject.Parse(response.data);
+        var envelope = JObject.Parse(response.Data);
         if (envelope["data"] != null)
-            response.data = envelope["data"].ToString(Formatting.None);
+            response.Data = envelope["data"].ToString(Formatting.None);
     }
 
-    response.headers["X-Intercepted"] = "1";
+    response.Headers["X-Intercepted"] = "1";
     return response;
 });
 

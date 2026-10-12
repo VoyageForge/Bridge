@@ -199,17 +199,17 @@ namespace VoyageForge.Bridge.Runtime
                 Debug.LogWarning($"[BridgeClient] 请求异常: {ex.Message} (URL: {request.url})");
                 var errorResponse = new Response<R>
                 {
-                    statusCode = 0,
-                    statusText = ex.GetType().Name,
-                    headers = new Dictionary<string, string>(),
-                    data = null
+                    StatusCode = 0,
+                    StatusText = ex.GetType().Name,
+                    Headers = new Dictionary<string, string>(),
+                    Data = null
                 };
 
                 // UnityWebRequestException 携带了底层请求，可从中取回真实状态码与结果枚举。
                 if (ex is UnityWebRequestException webEx && webEx.UnityWebRequest != null)
                 {
-                    errorResponse.statusCode = (HttpStatusCode)webEx.UnityWebRequest.responseCode;
-                    errorResponse.statusText = webEx.UnityWebRequest.result.ToString();
+                    errorResponse.StatusCode = (HttpStatusCode)webEx.UnityWebRequest.responseCode;
+                    errorResponse.StatusText = webEx.UnityWebRequest.result.ToString();
                 }
 
                 // 用实例事件而不是 Instance.OnError：即使单例已被 Destroy，这里也不会再抛 NullReferenceException。
@@ -220,9 +220,9 @@ namespace VoyageForge.Bridge.Runtime
             // 7. 构造响应容器；非 Success 结果直接返回（不执行响应拦截器）。
             var response = new Response<R>
             {
-                statusCode = (HttpStatusCode)uwr.responseCode,
-                statusText = uwr.result.ToString(),
-                headers = new Dictionary<string, string>()
+                StatusCode = (HttpStatusCode)uwr.responseCode,
+                StatusText = uwr.result.ToString(),
+                Headers = new Dictionary<string, string>()
             };
 
             if (uwr.result != UnityWebRequest.Result.Success)
@@ -234,7 +234,7 @@ namespace VoyageForge.Bridge.Runtime
             // 8. 成功响应：保留原始文本并反序列化为 R。
             string responseText = uwr.downloadHandler.text;
             response.RawText = responseText;
-            response.data = DeserializeBody<R>(responseText);
+            response.Data = DeserializeBody<R>(responseText);
 
             // 9. 响应拦截器：其修改会回写到最终响应（见方法注释）。
             ApplyResponseInterceptors(response, responseText);
@@ -280,10 +280,10 @@ namespace VoyageForge.Bridge.Runtime
 
             var raw = new Response<string>
             {
-                data = originalText,
-                statusCode = response.statusCode,
-                statusText = response.statusText,
-                headers = response.headers,
+                Data = originalText,
+                StatusCode = response.StatusCode,
+                StatusText = response.StatusText,
+                Headers = response.Headers,
                 RawText = originalText
             };
 
@@ -295,15 +295,15 @@ namespace VoyageForge.Bridge.Runtime
             }
 
             // 回写状态码、状态描述与响应头（headers 为 null 时补一个空字典，避免调用方拿到 null）。
-            response.statusCode = raw.statusCode;
-            response.statusText = raw.statusText;
-            response.headers = raw.headers ?? new Dictionary<string, string>();
+            response.StatusCode = raw.StatusCode;
+            response.StatusText = raw.StatusText;
+            response.Headers = raw.Headers ?? new Dictionary<string, string>();
 
             // 响应文本被改写时重新反序列化，使 data、RawText 与拦截器结果保持一致。
-            if (!string.Equals(raw.data, originalText, StringComparison.Ordinal))
+            if (!string.Equals(raw.Data, originalText, StringComparison.Ordinal))
             {
-                response.RawText = raw.data;
-                response.data = string.IsNullOrEmpty(raw.data) ? null : DeserializeBody<R>(raw.data);
+                response.RawText = raw.Data;
+                response.Data = string.IsNullOrEmpty(raw.Data) ? null : DeserializeBody<R>(raw.Data);
             }
         }
 

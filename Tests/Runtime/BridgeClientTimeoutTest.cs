@@ -45,8 +45,8 @@ namespace VoyageForge.Bridge.Tests
 
             var response = awaiter.GetResult();
             Assert.IsNotNull(response);
-            Assert.IsTrue(response.IsSuccessStatusCode, $"Status: {response.statusCode}");
-            Assert.IsNotNull(response.data);
+            Assert.IsTrue(response.IsSuccessStatusCode, $"Status: {response.StatusCode}");
+            Assert.IsNotNull(response.Data);
             Debug.Log("✅ Short request succeeded with BridgeClient");
         }
 
@@ -87,8 +87,8 @@ namespace VoyageForge.Bridge.Tests
                     $"请求在 {elapsed:F2}s 就成功返回，未越过 {HardLimitSeconds}s，无法证明不存在 60 秒硬限制。");
                 Debug.Log($"✅ 长请求在 {elapsed:F2}s 成功返回（>{HardLimitSeconds}s），未触发 60 秒硬限制。");
             }
-            else if (response.statusCode == 0 &&
-                     (response.statusText == "Timeout" || response.statusText == "Canceled"))
+            else if (response.StatusCode == 0 &&
+                     (response.StatusText == "Timeout" || response.StatusText == "Canceled"))
             {
                 // 超时且恰好落在 60 秒附近 → 确认硬限制存在。
                 Assert.IsTrue(Mathf.Abs(elapsed - HardLimitSeconds) <= HardLimitToleranceSeconds,
@@ -99,7 +99,7 @@ namespace VoyageForge.Bridge.Tests
             {
                 // 其他结果（代理拦截、DNS/网络故障等）无法对硬限制下结论，标记不确定而不是失败。
                 Assert.Inconclusive(
-                    $"结果不可判定: status={response.statusCode}, statusText={response.statusText}, elapsed={elapsed:F2}s");
+                    $"结果不可判定: status={response.StatusCode}, statusText={response.StatusText}, elapsed={elapsed:F2}s");
             }
         }
     }

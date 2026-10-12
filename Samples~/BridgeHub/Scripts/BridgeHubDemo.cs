@@ -41,15 +41,15 @@ namespace VoyageForge.Bridge.Sample.Hub
             {
                 var response = await OrderApi.GetOrderAsync(orderId);
 
-                if (response.IsSuccessStatusCode && response.data != null)
+                if (response.IsSuccessStatusCode && response.Data != null)
                 {
-                    Debug.Log($"[BridgeHubDemo] 请求成功: id={response.data.id}, " +
-                              $"userId={response.data.userId}, title={response.data.title}");
+                    Debug.Log($"[BridgeHubDemo] 请求成功: id={response.Data.id}, " +
+                              $"userId={response.Data.userId}, title={response.Data.title}");
                 }
                 else
                 {
-                    Debug.LogWarning($"[BridgeHubDemo] 请求失败: statusCode={response.statusCode}, " +
-                                     $"statusText={response.statusText}");
+                    Debug.LogWarning($"[BridgeHubDemo] 请求失败: statusCode={response.StatusCode}, " +
+                                     $"statusText={response.StatusText}");
                 }
 
                 if (logRawText)

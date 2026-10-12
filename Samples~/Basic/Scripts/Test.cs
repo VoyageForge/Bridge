@@ -23,11 +23,11 @@ namespace VoyageForge.Bridge.Sample
 
             if (response != null && response.IsSuccessStatusCode)
             {
-                Debug.Log($"[默认端点] 请求成功: id={response.data?.id}, name={response.data?.name}");
+                Debug.Log($"[默认端点] 请求成功: id={response.Data?.id}, name={response.Data?.name}");
             }
             else
             {
-                Debug.LogWarning($"[默认端点] 请求失败: {response?.statusCode}");
+                Debug.LogWarning($"[默认端点] 请求失败: {response?.StatusCode}");
             }
         }
 
@@ -46,11 +46,11 @@ namespace VoyageForge.Bridge.Sample
 
             if (response != null && response.IsSuccessStatusCode)
             {
-                Debug.Log($"[自定义端点 webapi] 请求成功: url={response.data?.url}");
+                Debug.Log($"[自定义端点 webapi] 请求成功: url={response.Data?.url}");
             }
             else
             {
-                Debug.LogWarning($"[自定义端点 webapi] 请求失败: {response?.statusCode}");
+                Debug.LogWarning($"[自定义端点 webapi] 请求失败: {response?.StatusCode}");
             }
         }
 
@@ -68,11 +68,11 @@ namespace VoyageForge.Bridge.Sample
 
             if (response != null && response.IsSuccessStatusCode)
             {
-                Debug.Log($"[完整 URL] 请求成功: id={response.data?.id}, title={response.data?.title}");
+                Debug.Log($"[完整 URL] 请求成功: id={response.Data?.id}, title={response.Data?.title}");
             }
             else
             {
-                Debug.LogWarning($"[完整 URL] 请求失败: {response?.statusCode}");
+                Debug.LogWarning($"[完整 URL] 请求失败: {response?.StatusCode}");
             }
         }
 

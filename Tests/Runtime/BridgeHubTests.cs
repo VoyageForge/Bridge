@@ -124,10 +124,10 @@ namespace VoyageForge.Bridge.Tests
             var response = awaiter.GetResult();
             Assert.IsNotNull(response);
             Assert.IsTrue(response.IsSuccessStatusCode,
-                $"StatusCode: {response.statusCode}, StatusText: {response.statusText}");
-            Assert.IsNotNull(response.data);
-            Assert.IsTrue(response.data.Contains("httpbin.org"),
-                $"请求未走登记的客户端（webapi 端点应指向 httpbin）: {response.data}");
+                $"StatusCode: {response.StatusCode}, StatusText: {response.StatusText}");
+            Assert.IsNotNull(response.Data);
+            Assert.IsTrue(response.Data.Contains("httpbin.org"),
+                $"请求未走登记的客户端（webapi 端点应指向 httpbin）: {response.Data}");
         }
     }
 }

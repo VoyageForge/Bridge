@@ -11,6 +11,23 @@
 - 发布工作流只做三件事：更新 `package.json` 的版本号与 `com.voyageforge.depot` 依赖、打 tag、
   创建 GitHub Release；OpenUPM 会在 tag 推送后自动构建新版本。
 
+## v0.0.16
+
+### Changed
+- **破坏性变更**：`Response<T>` 的公共成员由字段改为属性（PascalCase）——
+  `data` → `Data`、`statusCode` → `StatusCode`、`statusText` → `StatusText`、`headers` → `Headers`
+  （`RawText`、`IsSuccessStatusCode` 名称不变）。升级后请把 `response.data` 之类的访问改成 `response.Data`；
+  这是封装形式与命名的调整，行为不变。
+- 补全 `Response<T>` 全部成员的 XML 注释，并写明两处容易踩的语义：
+  网络层失败（超时 / 取消 / 连接错误）时 `StatusCode` 为 0；
+  `Headers` 目前在成功路径下也是空字典（尚未从 `UnityWebRequest` 回填真实响应头）。
+- README 新增 `Response<T>` 成员表，并同步「目录说明」与响应拦截器示例里的成员名。
+- 示例（`Samples~/Basic`、`Samples~/BridgeHub`）与测试同步改用新的属性名。
+
+### Fixed
+- 修正 `Response.cs` 缺少的文件结尾换行，以及 `Samples~/Basic/Scripts/Test.cs` 意外的 UTF-8 BOM
+  （仅编码与格式，无行为变化）。
+
 ## v0.0.15
 
 ### Added

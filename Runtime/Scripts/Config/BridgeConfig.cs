@@ -169,8 +169,13 @@ namespace VoyageForge.Bridge.Runtime
         /// <summary>
         /// 添加环境。已存在则忽略。
         /// </summary>
+        /// <param name="key">环境键，首尾空白会被去除。</param>
+        /// <returns>是否真的新增成功。</returns>
         public bool AddEnvironment(string key)
         {
+            // 先补齐保底数据，保证在"刚反序列化、尚未清理"的配置上编辑也安全。
+            EnsureDefaults();
+
             string normalized = NormalizeKey(key);
             if (string.IsNullOrWhiteSpace(normalized) || ContainsEnvironment(normalized))
                 return false;
@@ -186,8 +191,12 @@ namespace VoyageForge.Bridge.Runtime
         /// <summary>
         /// 删除环境及该环境下所有端点。dev 环境不可删除。
         /// </summary>
+        /// <param name="key">环境键，首尾空白会被去除。</param>
+        /// <returns>是否真的删除成功。</returns>
         public bool RemoveEnvironment(string key)
         {
+            EnsureDefaults();
+
             string normalized = NormalizeKey(key);
             if (string.IsNullOrWhiteSpace(normalized)) return false;
             if (string.Equals(normalized, ReservedEnvironmentKey, StringComparison.OrdinalIgnoreCase))
@@ -205,10 +214,13 @@ namespace VoyageForge.Bridge.Runtime
         }
 
         /// <summary>
-        /// 在指定环境下添加一条默认端点配置。
+        /// 在指定环境下添加一条默认端点配置（端点键 "default"、地址为空）。
         /// </summary>
+        /// <param name="environmentKey">所属环境键；环境不存在时会自动补入环境列表。</param>
         public void AddEndpoint(string environmentKey)
         {
+            EnsureDefaults();
+
             string normalized = NormalizeKey(environmentKey);
             if (string.IsNullOrWhiteSpace(normalized)) return;
 
@@ -224,15 +236,57 @@ namespace VoyageForge.Bridge.Runtime
         }
 
         /// <summary>
+        /// 修改指定环境下第 <paramref name="localIndex"/> 条端点的键与地址。
+        /// </summary>
+        /// <param name="environmentKey">所属环境键，按不区分大小写匹配。</param>
+        /// <param name="localIndex">该环境内的端点序号（从 0 开始）。</param>
+        /// <param name="endpointKey">新的端点键；为空时回退为 "default"。</param>
+        /// <param name="url">新的端点地址；会去掉首尾空白。</param>
+        /// <returns>是否找到并更新了目标端点。</returns>
+        public bool SetEndpoint(string environmentKey, int localIndex, string endpointKey, string url)
+        {
+            EnsureDefaults();
+
+            string normalizedEnvironmentKey = NormalizeKey(environmentKey);
+            if (string.IsNullOrWhiteSpace(normalizedEnvironmentKey)) return false;
+
+            int localCounter = 0;
+            foreach (var entry in _endpoints)
+            {
+                if (entry == null ||
+                    !string.Equals(entry.EnvironmentKey, normalizedEnvironmentKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (localCounter == localIndex)
+                {
+                    entry.EndpointKey = NormalizeEndpointKey(endpointKey);
+                    entry.Url = NormalizeUrl(url);
+                    return true;
+                }
+
+                localCounter++;
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// 删除指定环境下的第 localIndex 条端点。
         /// </summary>
+        /// <param name="environmentKey">所属环境键，按不区分大小写匹配。</param>
+        /// <param name="localIndex">该环境内的端点序号（从 0 开始）。</param>
         public void RemoveEndpoint(string environmentKey, int localIndex)
         {
+            EnsureDefaults();
+
+            string normalizedEnvironmentKey = NormalizeKey(environmentKey);
             int n = 0;
             for (int i = 0; i < _endpoints.Count; i++)
             {
                 var e = _endpoints[i];
-                if (e != null && string.Equals(e.EnvironmentKey, environmentKey, StringComparison.OrdinalIgnoreCase))
+                if (e != null && string.Equals(e.EnvironmentKey, normalizedEnvironmentKey, StringComparison.OrdinalIgnoreCase))
                 {
                     if (n == localIndex) { _endpoints.RemoveAt(i); return; }
                     n++;
@@ -309,10 +363,8 @@ namespace VoyageForge.Bridge.Runtime
                 }
 
                 entry.EnvironmentKey = NormalizeKey(entry.EnvironmentKey);
-                entry.EndpointKey = string.IsNullOrWhiteSpace(entry.EndpointKey)
-                    ? "default"
-                    : entry.EndpointKey.Trim();
-                entry.Url = entry.Url?.Trim() ?? string.Empty;
+                entry.EndpointKey = NormalizeEndpointKey(entry.EndpointKey);
+                entry.Url = NormalizeUrl(entry.Url);
 
                 if (string.IsNullOrWhiteSpace(entry.EnvironmentKey))
                 {
@@ -346,9 +398,29 @@ namespace VoyageForge.Bridge.Runtime
                 string.Equals(item, key, StringComparison.OrdinalIgnoreCase));
         }
 
+        /// <summary>
+        /// 规范化环境键，去除首尾空白；null 或纯空白返回空字符串。
+        /// </summary>
         private static string NormalizeKey(string key)
         {
             return string.IsNullOrWhiteSpace(key) ? string.Empty : key.Trim();
+        }
+
+        /// <summary>
+        /// 规范化端点键：null 或空白视为未设置，回退为 "default"。
+        /// 端点键是同一环境内区分多条地址的唯一依据，不允许为空。
+        /// </summary>
+        private static string NormalizeEndpointKey(string endpointKey)
+        {
+            return string.IsNullOrWhiteSpace(endpointKey) ? "default" : endpointKey.Trim();
+        }
+
+        /// <summary>
+        /// 规范化端点地址：null 视为空字符串，并去掉首尾空白。
+        /// </summary>
+        private static string NormalizeUrl(string url)
+        {
+            return url?.Trim() ?? string.Empty;
         }
     }
 }

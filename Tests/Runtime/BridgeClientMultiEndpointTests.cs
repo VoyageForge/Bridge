@@ -1,6 +1,4 @@
 using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -9,57 +7,13 @@ using VoyageForge.Bridge.Runtime;
 
 namespace VoyageForge.Bridge.Tests
 {
-    // ---------- 测试配置 ----------
-    internal class TestBridgeConfig : IBridgeConfig
-    {
-        public string EnvironmentKey { get; set; } = "test";
-        public List<string> EnvironmentKeys { get; } = new List<string> { "test" };
-        public List<EndpointConfig> Endpoints { get; } = new List<EndpointConfig>
-        {
-            new EndpointConfig { EnvironmentKey = "test", EndpointKey = "default", Url = "https://jsonplaceholder.typicode.com" },
-            new EndpointConfig { EnvironmentKey = "test", EndpointKey = "webapi", Url = "https://httpbin.org" }
-        };
-
-        public string GetBaseUrl(string endpointKey)
-        {
-            if (string.IsNullOrEmpty(endpointKey)) endpointKey = "default";
-            var match = Endpoints.FirstOrDefault(e => e.EndpointKey == endpointKey);
-            return match?.Url ?? Endpoints.First(e => e.EndpointKey == "default").Url;
-        }
-
-        public string BuildFullUrl(string endpointKey, string path, Dictionary<string, string> query = null)
-        {
-            var baseUrl = GetBaseUrl(endpointKey).TrimEnd('/');
-            var url = baseUrl + "/" + path.TrimStart('/');
-            if (query != null && query.Count > 0)
-                url += "?" + string.Join("&", query.Select(kv => $"{kv.Key}={kv.Value}"));
-            return url;
-        }
-
-        public void SetEnvironment(string environmentKey = null)
-        {
-            if (!string.IsNullOrWhiteSpace(environmentKey))
-                EnvironmentKey = environmentKey;
-        }
-    }
-
-    internal class TestBridgeConfigProvider : IBridgeConfigProvider
-    {
-        private readonly TestBridgeConfig _config = new();
-        public IBridgeConfig LoadConfig() => _config;
-        public void SaveConfig(IBridgeConfig config) { }
-        public string GetEnvironment(string key = null) => _config.EnvironmentKey;
-    }
-
-    internal class TestBridgeClient : BridgeClient<TestBridgeClient>
-    {
-        protected override IBridgeConfigProvider ConfigProvider => new TestBridgeConfigProvider();
-        protected override string urlKey => "default";
-    }
-
-    // ---------- 测试类 ----------
+    /// <summary>
+    /// 多端点场景的 PlayMode 测试：完整 URL、默认端点、自定义端点。
+    /// 依赖的公网地址：jsonplaceholder.typicode.com（default 端点）与 httpbin.org（webapi 端点）。
+    /// </summary>
     public class BridgeClientMultiEndpointTests
     {
+        /// <summary>完整 URL 请求：不应拼接任何端点 baseUrl。</summary>
         [UnityTest]
         public IEnumerator TestFullUrl()
         {
@@ -75,6 +29,10 @@ namespace VoyageForge.Bridge.Tests
             Assert.IsTrue(response.data.Contains("\"id\": 1") || response.data.Contains("\"id\":1"), $"Response missing 'id:1': {response.data}");
         }
 
+        /// <summary>
+        /// 默认端点请求：未指定 endpointKey，应由 urlKey（"default"）解析端点。
+        /// 若解析逻辑退化为使用环境键（"test"），严格版 TestBridgeConfig 会直接抛异常，测试失败。
+        /// </summary>
         [UnityTest]
         public IEnumerator TestDefaultEndpoint()
         {
@@ -89,6 +47,7 @@ namespace VoyageForge.Bridge.Tests
             Assert.IsTrue(response.data.Contains("\"id\": 1") || response.data.Contains("\"id\":1"));
         }
 
+        /// <summary>自定义端点请求：显式指定 endpointKey = "webapi"。</summary>
         [UnityTest]
         public IEnumerator TestCustomEndpoint()
         {
@@ -153,8 +112,11 @@ namespace VoyageForge.Bridge.Tests
         //     // 验证响应是包含 'url' 字段的 JSON（httpbin /delay 返回的就是 /get 的响应）
         //     Assert.IsTrue(response.data.Contains("\"url\"") && response.data.Contains("httpbin.org"), $"Response missing url or host: {response.data}");
         // }
-        
-        
+
+
+        /// <summary>
+        /// 长超时不应被提前掐断：服务端延迟 5 秒、超时设置为 120 秒，应在 5 秒左右完成。
+        /// </summary>
         [UnityTest]
         public IEnumerator TestLongTimeout_ShouldNotTimeoutPrematurely()
         {
@@ -175,7 +137,7 @@ namespace VoyageForge.Bridge.Tests
             float elapsed = Time.time - start;
 
             // 请求应在 5 秒左右完成（允许网络波动），而不是 60 秒
-            Assert.IsTrue(elapsed >= 4f && elapsed < 15f, 
+            Assert.IsTrue(elapsed >= 4f && elapsed < 15f,
                 $"Request took {elapsed:F2}s, expected around 5s (should not hit 60s timeout)");
 
             var response = awaiter.GetResult();
@@ -184,7 +146,7 @@ namespace VoyageForge.Bridge.Tests
             Assert.IsNotNull(response.data);
 
             // 验证返回的是有效 JSON（包含 "url" 字段）
-            Assert.IsTrue(response.data.Contains("\"url\""), 
+            Assert.IsTrue(response.data.Contains("\"url\""),
                 $"Response missing 'url' field: {response.data}");
         }
     }

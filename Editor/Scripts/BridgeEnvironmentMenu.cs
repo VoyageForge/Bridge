@@ -1,28 +1,37 @@
-﻿using System;
-using VoyageForge.Bridge.Runtime;
 using UnityEditor;
 using UnityEngine;
 
 namespace VoyageForge.Bridge.Editor
 {
     /// <summary>
-    /// Bridge 环境快捷切换菜单。
+    /// Bridge 环境快捷切换菜单入口。
     /// </summary>
     public static class BridgeEnvironmentMenu
     {
+        /// <summary>打开 Bridge 配置面板的菜单项路径。</summary>
         private const string SettingsMenuPath = "VoyageForge/Bridge/Bridge Config";
+
+        /// <summary>打开环境快捷切换窗口的菜单项路径。</summary>
         private const string EnvironmentMenuPath = "VoyageForge/Bridge/Bridge Environment/选择当前环境";
 
+        /// <summary>
+        /// 菜单项：打开 Project Settings 中的 Bridge 面板。
+        /// </summary>
         [MenuItem(SettingsMenuPath, false, 100)]
         public static void OpenProjectSettings()
         {
             BridgeSettingsProvider.OpenSettings();
         }
 
+        /// <summary>
+        /// 菜单项：打开环境快捷切换窗口。
+        /// 配置通过 <see cref="BridgeConfigEditorAccess.GetOrCreateConfig"/> 获取，
+        /// 与运行时及 Project Settings 面板保持同一数据源（ScriptableObject 资产或配置提供器）。
+        /// </summary>
         [MenuItem(EnvironmentMenuPath, false, 101)]
         private static void ShowEnvironmentMenu()
         {
-            var config = BridgeSettingsProvider.GetOrCreateConfigAsset();
+            var config = BridgeConfigEditorAccess.GetOrCreateConfig();
             if (config == null)
             {
                 Debug.LogError("未找到或无法创建 BridgeConfig 配置资源。请先打开 Project Settings 检查配置。");
@@ -32,87 +41,13 @@ namespace VoyageForge.Bridge.Editor
             BridgeEnvironmentQuickSwitchWindow.Open(config);
         }
 
+        /// <summary>
+        /// 菜单可用性校验：配置可获取（必要时会按既定规则创建默认配置）时才允许点击。
+        /// </summary>
         [MenuItem(EnvironmentMenuPath, true)]
         private static bool ValidateEnvironmentMenu()
         {
-            return BridgeSettingsProvider.GetOrCreateConfigAsset() != null;
-        }
-    }
-
-    /// <summary>
-    /// Bridge 环境快速切换窗口。
-    /// </summary>
-    internal sealed class BridgeEnvironmentQuickSwitchWindow : EditorWindow
-    {
-        private BridgeConfigAsset config;
-
-        /// <summary>
-        /// 打开窗口并绑定配置对象。
-        /// </summary>
-        public static void Open(BridgeConfigAsset config)
-        {
-            var window = CreateInstance<BridgeEnvironmentQuickSwitchWindow>();
-            window.config = config;
-            window.titleContent = new GUIContent("快速切换环境");
-            window.minSize = new Vector2(260f, 120f);
-            window.maxSize = new Vector2(360f, 480f);
-            window.ShowUtility();
-        }
-
-        /// <summary>
-        /// 绘制窗口内容。
-        /// </summary>
-        private void OnGUI()
-        {
-            if (config == null)
-            {
-                EditorGUILayout.HelpBox("未找到 BridgeConfig 配置资源。", MessageType.Warning);
-                if (GUILayout.Button("打开配置"))
-                {
-                    BridgeSettingsProvider.OpenSettings();
-                    Close();
-                }
-
-                return;
-            }
-
-            EditorGUILayout.Space(8f);
-            EditorGUILayout.LabelField("快速切换环境", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField("点击下面的环境名称即可立即切换。", EditorStyles.wordWrappedLabel);
-            EditorGUILayout.Space(8f);
-
-            if (config.EnvironmentKeys.Count == 0)
-            {
-                EditorGUILayout.HelpBox("当前没有可用环境，请先到 Project Settings 中配置。", MessageType.Info);
-            }
-            else
-            {
-                foreach (string environmentKey in config.EnvironmentKeys)
-                {
-                    using (new EditorGUI.DisabledScope(string.Equals(config.EnvironmentKey, environmentKey, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        string buttonText = string.Equals(config.EnvironmentKey, environmentKey, StringComparison.OrdinalIgnoreCase)
-                            ? $"当前环境：{environmentKey}"
-                            : environmentKey;
-
-                        if (GUILayout.Button(buttonText, GUILayout.Height(28f)))
-                        {
-                            config.EnvironmentKey = environmentKey;
-                            EditorUtility.SetDirty(config);
-                            AssetDatabase.SaveAssets();
-                            Debug.Log($"Bridge 当前环境已切换为：{environmentKey}");
-                            Close();
-                        }
-                    }
-                }
-            }
-
-            EditorGUILayout.Space(8f);
-            if (GUILayout.Button("打开配置面板"))
-            {
-                BridgeSettingsProvider.OpenSettings();
-                Close();
-            }
+            return BridgeConfigEditorAccess.GetOrCreateConfig() != null;
         }
     }
 }

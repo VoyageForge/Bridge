@@ -117,7 +117,20 @@ namespace VoyageForge.Bridge.Runtime
             }
 
             // 6. 反序列化并缓存结果。
-            var config = BridgeConfig.FromJson(json);
+            //    FromJson 对非法 JSON 会抛异常（ArgumentException / InvalidOperationException /
+            //    JsonException），这里统一兜住并返回 null，与「解析失败返回 null」的约定保持一致，
+            //    避免一份坏配置直接把调用方（启动流程）中断。
+            BridgeConfig config;
+            try
+            {
+                config = BridgeConfig.FromJson(json);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Bridge] JSON 配置解析失败: {url}\n错误: {e.Message}");
+                return null;
+            }
+
             _cachedConfig = config;
             return _cachedConfig;
         }

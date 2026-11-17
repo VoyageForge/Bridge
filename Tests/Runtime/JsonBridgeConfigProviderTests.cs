@@ -201,5 +201,37 @@ namespace VoyageForge.Bridge.Tests
             Assert.AreEqual("changed", second.EnvironmentKey, "ClearCache 后应重新读文件");
             Assert.AreNotSame(first, second, "清缓存后应产生新的配置实例");
         }
+
+        /// <summary>
+        /// 文件内容不是合法 JSON 时应返回 null 并记录错误，而不是把异常抛给调用方。
+        ///
+        /// <para>
+        /// 这条对应类注释里「解析失败返回 null」的约定：
+        /// 修复前 LoadConfig 直接调用 BridgeConfig.FromJson，非法 JSON 会抛异常，
+        /// 导致启动流程被一份坏配置中断。
+        /// </para>
+        /// </summary>
+        [UnityTest]
+        public IEnumerator LoadConfig_InvalidJson_ReturnsNull()
+        {
+            // 写入非法 JSON 内容（文件存在但无法反序列化）。
+            string directory = Path.GetDirectoryName(_fullPath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllText(_fullPath, "{ this is not valid json }");
+
+            // 解析失败会输出 LogError，测试必须显式预期，否则会被判定为失败。
+            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("解析失败"));
+
+            var provider = new JsonBridgeConfigProvider(RelativePath);
+
+            IBridgeConfig result = null;
+            yield return provider.LoadConfig().ToCoroutine(r => result = r);
+
+            Assert.IsNull(result, "非法 JSON 应返回 null 而不是抛异常");
+        }
     }
 }

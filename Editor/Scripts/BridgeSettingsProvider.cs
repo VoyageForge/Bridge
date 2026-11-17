@@ -6,7 +6,6 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 using VoyageForge.Bridge.Runtime;
-using VoyageForge.Depot.Editor.Utilities;
 
 namespace VoyageForge.Bridge.Editor
 {
@@ -21,11 +20,42 @@ namespace VoyageForge.Bridge.Editor
         private const string SettingsPath = "Project/VoyageForge/Bridge";
 
         /// <summary>
-        /// 面板布局文件。这里沿用历史写法（相对 Assets 的路径），
-        /// 实际解析由 Depot 的 UxmlUtility 完成：它只取文件名，并在"调用方所属包"内搜索，
-        /// 因此 Packages/Bridge 下的同名 UXML 也能被正确找到。
+        /// 面板布局文件名（不含路径与扩展名）。
+        ///
+        /// <para>
+        /// 不硬编码路径的原因：Bridge 作为 UPM 包安装时实际路径是
+        /// <c>Packages/com.voyageforge.bridge/...</c>，而包被复制进 Assets 时又是
+        /// <c>Assets/...</c>，两者不同。这里按资源名在「本类所属程序集所在的包」内搜索，
+        /// 两种情况都能找到。
+        /// </para>
         /// </summary>
-        private const string UxmlPath = "Assets/Bridge/Editor/Scripts/BridgeProjectSettingsView.uxml";
+        private const string UxmlAssetName = "BridgeProjectSettingsView";
+
+        /// <summary>
+        /// 加载面板布局 UXML：按资源名在「本类所属包」内搜索并加载。
+        /// </summary>
+        /// <returns>加载到的 VisualTreeAsset；找不到时返回 null 并输出警告。</returns>
+        private static VisualTreeAsset LoadProjectSettingsUxml()
+        {
+            // 定位本类所在程序集归属的包（Assets 下的脚本会返回 null）。
+            var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                typeof(BridgeSettingsProvider).Assembly);
+
+            // 包内 → 限定包根目录；否则回退到 Assets。
+            string[] searchFolders = packageInfo != null
+                ? new[] { $"Packages/{packageInfo.name}" }
+                : new[] { "Assets" };
+
+            string[] guids = AssetDatabase.FindAssets($"t:VisualTreeAsset {UxmlAssetName}", searchFolders);
+            if (guids.Length == 0)
+            {
+                Debug.LogWarning(
+                    $"[Bridge] 未找到 {UxmlAssetName}.uxml（搜索范围：{string.Join(", ", searchFolders)}）");
+                return null;
+            }
+
+            return AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(AssetDatabase.GUIDToAssetPath(guids[0]));
+        }
 
         /// <summary>
         /// 创建面板实例。
@@ -82,7 +112,7 @@ namespace VoyageForge.Bridge.Editor
         {
             rootElement.Clear();
 
-            var visualTree = UxmlUtility.LoadVisualTreeAsset(UxmlPath);
+            var visualTree = LoadProjectSettingsUxml();
             if (visualTree == null)
             {
                 rootElement.Add(new Label("UXML 加载失败"));

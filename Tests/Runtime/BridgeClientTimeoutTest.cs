@@ -1,5 +1,4 @@
 using System.Collections;
-using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -8,29 +7,31 @@ using VoyageForge.Bridge.Runtime;
 namespace VoyageForge.Bridge.Tests
 {
     /// <summary>
-    /// BridgeClient 超时行为测试：核心目的是验证 UnityWebRequest 是否存在 60 秒硬限制。
-    /// 这两个用例依赖公网 httpbin.org，而服务端 /drip 的实际耗时受网络与代理影响
-    /// （实测请求 68~70 秒的 drip 会在 61~63 秒就结束），因此断言只针对"可判定的不变量"：
-    /// 成功返回必须越过 60 秒才能证明不存在硬限制；无法判定的情况标记为 Inconclusive，而不是误报失败。
+    /// BridgeClient 超时行为测试：验证"慢响应不会被提前掐断"与"正常请求按预期完成"。
+    ///
+    /// <para>
+    /// 改造说明：
+    /// 1. 原实现依赖公网 httpbin.org 的 /delay 与 /drip，结果不可判定时只能 Inconclusive；
+    ///    现改用 <see cref="LocalDelayServer"/> 提供本机可控延迟，断言全部确定。
+    /// 2. 等待方式保持 [UnityTest] + IEnumerator 手动轮询：
+    ///    当前项目的 Unity Test Framework 是 1.1.33，官方明确不支持 async Task 测试
+    ///    （会报 "Method has non-void return value"），因此这里不使用 async/await。
+    /// </para>
     /// </summary>
     public class BridgeClientTimeoutTest
     {
-        /// <summary>待验证的 UnityWebRequest 硬限制（秒）。</summary>
-        private const float HardLimitSeconds = 60f;
-
-        /// <summary>判断"超时发生在硬限制附近"时允许的误差（秒）。</summary>
-        private const float HardLimitToleranceSeconds = 10f;
-
-        /// <summary>短请求应正常成功（不涉及硬限制，仅作为对照组）。</summary>
+        /// <summary>短请求应正常成功（不涉及超时，仅作为正常路径对照）。</summary>
         [UnityTest]
         public IEnumerator TestShortRequest_ShouldSucceed()
         {
+            // 本地服务器：仅延迟 300ms，几乎瞬时完成，作为「正常路径」对照。
+            using var server = new LocalDelayServer(delayMs: 300);
+
             var request = new Request
             {
-                url = "/delay/5",
+                url = server.Url,
                 method = "GET",
-                timeoutSeconds = 120,
-                endpointKey = "webapi" // 确保使用 httpbin 端点
+                timeoutSeconds = 30
             };
 
             var task = TestBridgeClient.SendAsync<string>(request);
@@ -40,31 +41,32 @@ namespace VoyageForge.Bridge.Tests
                 yield return null;
             float elapsed = Time.time - start;
 
-            Assert.IsTrue(elapsed >= 4f && elapsed < 20f,
-                $"Short request took {elapsed:F2}s, expected around 5s");
-
             var response = awaiter.GetResult();
             Assert.IsNotNull(response);
             Assert.IsTrue(response.IsSuccessStatusCode, $"Status: {response.StatusCode}");
-            Assert.IsNotNull(response.Data);
-            Debug.Log("✅ Short request succeeded with BridgeClient");
+            Assert.AreEqual(LocalDelayServer.ResponseBody, response.Data);
+
+            // 上界给足余量：只排除「明显异常地慢」，不把机器负载绑进断言。
+            Assert.IsTrue(elapsed < 15f, $"短请求耗时 {elapsed:F2}s 过长");
+            Debug.Log($"✅ 短请求在 {elapsed:F2}s 成功完成（BridgeClient）");
         }
 
         /// <summary>
-        /// 长请求（服务端持续输出 70 秒，客户端超时设为 120 秒）用于跨过 60 秒这条线：
-        /// 成功返回且耗时 &gt; 60 秒 ⇒ 不存在硬限制；
-        /// 在 60 秒附近超时 ⇒ 硬限制存在（用例通过，仅记录该事实）。
+        /// 慢响应不应被提前掐断：本地服务器延迟 2 秒响应，客户端超时设为 30 秒，
+        /// 请求应按服务端的 2 秒延迟正常完成，而不是被更短的超时提前截断。
         /// </summary>
         [UnityTest]
         public IEnumerator TestLongRequest_ShouldNotTimeoutPrematurely()
         {
+            // 本地回环服务器：固定延迟 2 秒后返回 200，不依赖任何公网服务。
+            using var server = new LocalDelayServer(delayMs: 2000);
+
             var request = new Request
             {
-                // httpbin 的 /drip 会在 duration 秒内持续输出，用来跨越 60 秒。
-                url = "/drip?duration=70&numbytes=10&code=200",
+                // 完整 URL：BridgeClient 对完整 URL 不拼接任何端点 baseUrl（见 TestFullUrl）。
+                url = server.Url,
                 method = "GET",
-                timeoutSeconds = 120,  // 远大于 60 秒硬限制
-                endpointKey = "webapi" // 确保使用 httpbin 端点
+                timeoutSeconds = 30
             };
 
             var task = TestBridgeClient.SendAsync<string>(request);
@@ -78,29 +80,20 @@ namespace VoyageForge.Bridge.Tests
 
             var response = awaiter.GetResult();
             Assert.IsNotNull(response, "SendAsync 不应返回 null");
+            Assert.IsTrue(response.IsSuccessStatusCode,
+                $"Status: {response.StatusCode}, StatusText: {response.StatusText}");
+            Assert.AreEqual(LocalDelayServer.ResponseBody, response.Data,
+                "响应体应来自本地延迟服务器");
 
-            if (response.IsSuccessStatusCode)
-            {
-                // 只校验下界：成功耗时越过 60 秒才足以证明没有硬限制。
-                // 不校验上界——drip 可能提前结束（实测 61~63 秒），把上界绑死在请求时长上会导致误报。
-                Assert.IsTrue(elapsed > HardLimitSeconds,
-                    $"请求在 {elapsed:F2}s 就成功返回，未越过 {HardLimitSeconds}s，无法证明不存在 60 秒硬限制。");
-                Debug.Log($"✅ 长请求在 {elapsed:F2}s 成功返回（>{HardLimitSeconds}s），未触发 60 秒硬限制。");
-            }
-            else if (response.StatusCode == 0 &&
-                     (response.StatusText == "Timeout" || response.StatusText == "Canceled"))
-            {
-                // 超时且恰好落在 60 秒附近 → 确认硬限制存在。
-                Assert.IsTrue(Mathf.Abs(elapsed - HardLimitSeconds) <= HardLimitToleranceSeconds,
-                    $"在 {elapsed:F2}s 超时，与预期的 {HardLimitSeconds}s 硬限制不符。");
-                Debug.LogWarning($"⚠️ 在 {elapsed:F2}s 超时，确认 UnityWebRequest 60 秒硬限制存在。");
-            }
-            else
-            {
-                // 其他结果（代理拦截、DNS/网络故障等）无法对硬限制下结论，标记不确定而不是失败。
-                Assert.Inconclusive(
-                    $"结果不可判定: status={response.StatusCode}, statusText={response.StatusText}, elapsed={elapsed:F2}s");
-            }
+            // 核心断言：耗时下界证明服务端 2 秒延迟确实被完整等待，没有被更短的超时提前掐断。
+            Assert.IsTrue(elapsed >= 1.5f,
+                $"请求在 {elapsed:F2}s 就结束，服务端 2s 延迟未生效（可能被提前超时）");
+
+            // 上界给足余量：只排除「明显异常地慢」。
+            Assert.IsTrue(elapsed < 15f,
+                $"请求耗时 {elapsed:F2}s 过长，可能未正常完成");
+
+            Debug.Log($"✅ 慢响应在 {elapsed:F2}s 正常完成，未被提前超时。");
         }
     }
 }

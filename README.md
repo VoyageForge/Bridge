@@ -17,6 +17,7 @@ Bridge 是 VoyageForge 的 Unity 通信连接模块，用来统一连接本地�
 - `Runtime/Scripts/Config/BridgeConfig.cs` — 纯 C#（JSON）形式的配置实现，行为与 BridgeConfigAsset 一致。
 - `Runtime/Scripts/Config/EndpointConfig.cs` — 单条端点配置（环境键 + 端点键 + 地址）。
 - `Runtime/Scripts/Config/JsonBridgeConfigProvider.cs` — 从 StreamingAssets 读取 JSON 配置的提供器。
+- `Runtime/Scripts/Config/ResourcesBridgeConfigProvider.cs` — 从 Resources 读取 BridgeConfigAsset 的提供器（正式可选实现）。
 - `Runtime/Scripts/Config/BridgeConfigProviderFactory.cs` — 按类型名反射创建配置提供器。
 - `Runtime/Scripts/BridgeHub.cs` — 第三方包调用 Bridge 的统一静态门面（见下文「作为依赖库使用 Bridge」）。
 - `Runtime/Scripts/IBridgeClient.cs` — 非泛型客户端契约；包与测试面向它编程，而不是某个具体客户端类型。
@@ -31,17 +32,23 @@ Bridge 是 VoyageForge 的 Unity 通信连接模块，用来统一连接本地�
 - `Editor/Styles/` — UXML 布局与 USS 样式。
 
 ### Samples
-- `Samples~/Basic/` — 示例项目，包含完整的 WebClient 实现和多端点测试用例。
+- `Samples~/Basic/` — 示例项目，包含完整的 WebClient 实现与示例配置资源。
 - `Samples~/BridgeHub/` — 演示「第三方包依赖 Bridge」的用法：包只写静态封装（走 `BridgeHub`），
   应用侧提供客户端并自动登记；含示例配置、演示入口与说明文档。
 - 在 Package Manager 中点击 Import 即可导入到 `Assets/Samples/` 目录。
 
 ### Tests
-- `Tests/Runtime/` — PlayMode 测试，覆盖：完整 URL / 默认端点（urlKey 解析）/ 自定义端点 / 响应拦截器回写 /
-  BridgeHub（客户端自动登记、先到先得、显式覆盖、未初始化异常、请求确实经由登记的客户端发出）。
-- 超时类用例只断言可判定的不变量（成功必须越过 60 秒才说明没有硬限制；无法判定时标 Inconclusive），
-  不把断言绑死在服务端 drip 的精确时长上。
-- 测试直接访问公网地址（jsonplaceholder.typicode.com / httpbin.org），离线环境下会失败。
+- `Tests/Runtime/` — EditMode 测试（asmdef 的 `includePlatforms` 限定为 `Editor`），共 27 个用例，覆盖：
+  - **端点解析**：完整 URL（跳过 baseUrl 拼接）/ 默认端点（按 `urlKey` 解析）/ 自定义端点
+  - **响应拦截器回写**：改写响应体与状态描述后能正确体现在返回的 `Response<T>` 上
+  - **BridgeHub 门面**：未初始化异常、客户端首次实例化自动登记、先到先得、显式覆盖、传 null 抛异常、请求确实经登记客户端发出
+  - **配置提供器**：
+    - `JsonBridgeConfigProvider` — 文件缺失时编辑器自动创建默认配置、读取并反序列化、缓存命中、
+      `GetEnvironment`、`SaveConfig` 落盘并清缓存、`ClearCache` 强制重读、**非法 JSON 返回 null**
+    - `ResourcesBridgeConfigProvider` — 资源缺失返回 null、存在资产时加载、环境键缺失回退 `dev`、读取配置的环境键
+  - **超时行为**：本机延迟服务器验证「慢响应不会被提前超时掐断」
+- 超时类用例使用测试内置的 `LocalDelayServer`（本机 `TcpListener` 提供可控延迟），
+  **全部断言确定性，不依赖任何公网服务**（此前依赖 httpbin.org 且用 `Inconclusive` 兜底的写法已移除）。
 
 ## 配置规则
 
@@ -69,7 +76,8 @@ public class WebClient : BridgeClient<WebClient>
 }
 ```
 
-- `ConfigProvider` 决定配置从哪里来：`ResourcesBridgeConfigProvider` 读取 Resources 下的 `BridgeConfigAsset`（该实现位于 `Samples~/Basic`，可直接复用或自行实现 `IBridgeConfigProvider`）。
+- `ConfigProvider` 决定配置从哪里来：`ResourcesBridgeConfigProvider` 读取 Resources 下的 `BridgeConfigAsset`
+  （该实现位于 `Runtime/Scripts/Config/`，是正式可选实现，可直接复用或自行实现 `IBridgeConfigProvider`）。
 - `urlKey` 是**默认端点键**：请求未显式设置 `endpointKey` 时使用它，默认值为 `"default"`。
   Bridge 只会从「当前环境的端点列表」中按这个键取地址，不会用环境键去当端点键。
 

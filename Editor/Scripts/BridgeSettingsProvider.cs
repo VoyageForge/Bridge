@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Cysharp.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -67,6 +68,18 @@ namespace VoyageForge.Bridge.Editor
         /// <param name="rootElement">面板根元素。</param>
         private static void BuildUi(VisualElement rootElement)
         {
+            // UI 回调（activateHandler、按钮、下拉框）不能 async，这里 fire-and-forget。
+            // 真正异步的是 BuildUiAsync，它内部 await 配置加载（提供器可能走 UnityWebRequest）。
+            BuildUiAsync(rootElement).Forget();
+        }
+
+        /// <summary>
+        /// 异步构建面板：先 await 配置加载，再搭建 UI。
+        /// 之前这里用 .AsTask().Result 同步等待，配置提供器走 UnityWebRequest 时会在编辑器主线程死锁。
+        /// </summary>
+        /// <param name="rootElement">面板根元素。</param>
+        private static async UniTaskVoid BuildUiAsync(VisualElement rootElement)
+        {
             rootElement.Clear();
 
             var visualTree = UxmlUtility.LoadVisualTreeAsset(UxmlPath);
@@ -78,7 +91,7 @@ namespace VoyageForge.Bridge.Editor
 
             visualTree.CloneTree(rootElement);
 
-            var config = BridgeConfigEditorAccess.GetOrCreateConfig();
+            var config = await BridgeConfigEditorAccess.GetOrCreateConfig();
             if (config == null)
             {
                 rootElement.Add(new Label("配置加载失败"));
@@ -188,7 +201,7 @@ namespace VoyageForge.Bridge.Editor
             popup.RegisterValueChangedCallback(evt =>
             {
                 config.SetEnvironment(evt.newValue);
-                BridgeConfigEditorAccess.Save(config);
+                BridgeConfigEditorAccess.Save(config).Forget();
                 BuildUi(rootElement);
             });
             container.Add(popup);
@@ -205,7 +218,7 @@ namespace VoyageForge.Bridge.Editor
                     // AddEnvironment 内部负责去重、规范化，并在需要时把新环境设为当前环境。
                     if (config.AddEnvironment(key))
                     {
-                        BridgeConfigEditorAccess.Save(config);
+                        BridgeConfigEditorAccess.Save(config).Forget();
                     }
 
                     if (input != null) input.value = string.Empty;
@@ -241,7 +254,7 @@ namespace VoyageForge.Bridge.Editor
             var addEndpointButton = new Button(() =>
             {
                 config.AddEndpoint(environmentKey);
-                BridgeConfigEditorAccess.Save(config);
+                BridgeConfigEditorAccess.Save(config).Forget();
                 BuildUi(rootElement);
             })
             { text = "新增链接" };
@@ -254,7 +267,7 @@ namespace VoyageForge.Bridge.Editor
                 // RemoveEnvironment 内部同样会拒绝删除 dev；按钮置灰只是更直观的提示。
                 if (config.RemoveEnvironment(environmentKey))
                 {
-                    BridgeConfigEditorAccess.Save(config);
+                    BridgeConfigEditorAccess.Save(config).Forget();
                 }
 
                 BuildUi(rootElement);
@@ -319,7 +332,7 @@ namespace VoyageForge.Bridge.Editor
             {
                 // 端点键清理（空值回退 default）由配置实现负责，界面只投递原始输入。
                 config.SetEndpoint(environmentKey, localIndex, evt.newValue, entry.Url);
-                BridgeConfigEditorAccess.Save(config);
+                BridgeConfigEditorAccess.Save(config).Forget();
             });
             row.Add(keyField);
 
@@ -328,7 +341,7 @@ namespace VoyageForge.Bridge.Editor
             urlField.RegisterValueChangedCallback(evt =>
             {
                 config.SetEndpoint(environmentKey, localIndex, entry.EndpointKey, evt.newValue);
-                BridgeConfigEditorAccess.Save(config);
+                BridgeConfigEditorAccess.Save(config).Forget();
             });
             row.Add(urlField);
 
@@ -336,7 +349,7 @@ namespace VoyageForge.Bridge.Editor
             {
                 // localIndex 在编辑期间可能因重建而变化，这里传环境内序号交给配置实现重新定位。
                 config.RemoveEndpoint(environmentKey, localIndex);
-                BridgeConfigEditorAccess.Save(config);
+                BridgeConfigEditorAccess.Save(config).Forget();
                 BuildUi(rootElement);
             })
             { text = "删除链接" };

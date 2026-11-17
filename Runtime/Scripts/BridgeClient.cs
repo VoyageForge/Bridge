@@ -32,17 +32,52 @@ namespace VoyageForge.Bridge.Runtime
         protected abstract IBridgeConfigProvider ConfigProvider { get; }
 
         /// <summary>
-        /// 当前使用的配置对象。首次访问时通过 <see cref="ConfigProvider"/> 加载并缓存。
+        /// 当前已缓存的配置对象（对应 <see cref="IBridgeClient.Config"/>）。
+        /// 配置采用异步加载，首次请求完成前该属性为 null；
+        /// 需要"确保已加载"时请改用 <see cref="GetConfigAsync"/>。
         /// </summary>
-        public IBridgeConfig Config
-        {
-            get
-            {
-                _config ??= ConfigProvider.LoadConfig();
-                return _config;
-            }
-        }
+        public IBridgeConfig Config => _config;
+
+        /// <summary>已加载的配置实例；null 表示尚未加载完成。</summary>
         private IBridgeConfig _config;
+
+        /// <summary>是否已经发起过配置加载，避免并发请求各自加载一份。</summary>
+        private bool _configLoadingStarted;
+
+        /// <summary>进行中的配置加载任务，供并发调用方复用同一个 UniTask。</summary>
+        private UniTask<IBridgeConfig> _configLoading;
+
+        /// <summary>
+        /// 获取配置对象；首次调用触发异步加载，后续调用直接返回缓存。
+        /// 并发调用会复用同一个加载任务，保证 Resources/StreamingAssets 只被读取一次。
+        /// </summary>
+        /// <returns>配置实例；加载失败时返回 null。</returns>
+        public UniTask<IBridgeConfig> GetConfigAsync()
+        {
+            // 已加载完成时直接返回，避免重复 IO。
+            if (_config != null)
+            {
+                return UniTask.FromResult(_config);
+            }
+
+            // 只有第一次调用真正发起加载；后续并发调用复用同一个 UniTask。
+            if (!_configLoadingStarted)
+            {
+                _configLoadingStarted = true;
+                _configLoading = LoadConfigAsync();
+            }
+
+            return _configLoading;
+        }
+
+        /// <summary>
+        /// 执行真正的配置加载，并在完成后写入缓存。
+        /// </summary>
+        private async UniTask<IBridgeConfig> LoadConfigAsync()
+        {
+            _config = await ConfigProvider.LoadConfig();
+            return _config;
+        }
 
         /// <summary>
         /// 默认端点键的静态快捷访问，等价于 <c>Instance.urlKey</c>。
@@ -77,21 +112,38 @@ namespace VoyageForge.Bridge.Runtime
 
         /// <summary>
         /// 读取当前环境下指定端点的基础地址；<paramref name="key"/> 为空时使用默认端点键。
+        /// 注意：该方法是同步的，要求配置已经通过 <see cref="GetConfigAsync"/> 加载完成。
         /// </summary>
         /// <param name="key">端点键；为空表示使用 <see cref="urlKey"/>。</param>
+        /// <returns>基础地址；配置尚未加载时返回 null 并打印错误日志。</returns>
         public string GetBaseUrl(string key = null)
-            => Config.GetBaseUrl(string.IsNullOrWhiteSpace(key) ? urlKey : key);
+        {
+            if (_config == null)
+            {
+                Debug.LogError("[Bridge] 配置尚未加载，请先 await GetConfigAsync() 再调用 GetBaseUrl。");
+                return null;
+            }
+
+            return _config.GetBaseUrl(string.IsNullOrWhiteSpace(key) ? urlKey : key);
+        }
 
         /// <summary>
         /// 切换当前环境。
+        /// 注意：该方法是同步的，要求配置已经通过 <see cref="GetConfigAsync"/> 加载完成。
         /// </summary>
         /// <param name="environmentKey">要切换到的环境键；为空表示回到保底环境 dev。</param>
         public void SetEnvironmentKey(string environmentKey = "")
         {
+            if (_config == null)
+            {
+                Debug.LogError("[Bridge] 配置尚未加载，请先 await GetConfigAsync() 再切换环境。");
+                return;
+            }
+
             if (string.IsNullOrEmpty(environmentKey))
-                Config.SetEnvironment();
+                _config.SetEnvironment();
             else
-                Config.SetEnvironment(environmentKey);
+                _config.SetEnvironment(environmentKey);
         }
 
         /// <summary>
@@ -105,20 +157,24 @@ namespace VoyageForge.Bridge.Runtime
         private static readonly List<Func<Response<string>, Response<string>>> responseInterceptors = new();
 
         /// <summary>注册请求拦截器（在 URL 拼接、请求头合并之后，发送之前执行）。</summary>
-        public static void UseRequestInterceptor(Func<Request, Request> interceptor) => requestInterceptors.Add(interceptor);
+        public static void UseRequestInterceptor(Func<Request, Request> interceptor) =>
+            requestInterceptors.Add(interceptor);
 
         /// <summary>移除已注册的请求拦截器。</summary>
-        public static void RemoveRequestInterceptor(Func<Request, Request> interceptor) => requestInterceptors.Remove(interceptor);
+        public static void RemoveRequestInterceptor(Func<Request, Request> interceptor) =>
+            requestInterceptors.Remove(interceptor);
 
         /// <summary>
         /// 注册响应拦截器（HTTP 成功返回且响应体反序列化之后执行）。
         /// 拦截器操作的是原始文本形式的响应（<see cref="Response{T}"/> 的 T 为 string），
         /// 对状态码、状态描述、响应头和响应文本的修改都会回写到最终返回的响应上。
         /// </summary>
-        public static void UseResponseInterceptor(Func<Response<string>, Response<string>> interceptor) => responseInterceptors.Add(interceptor);
+        public static void UseResponseInterceptor(Func<Response<string>, Response<string>> interceptor) =>
+            responseInterceptors.Add(interceptor);
 
         /// <summary>移除已注册的响应拦截器。</summary>
-        public static void RemoveResponseInterceptor(Func<Response<string>, Response<string>> interceptor) => responseInterceptors.Remove(interceptor);
+        public static void RemoveResponseInterceptor(Func<Response<string>, Response<string>> interceptor) =>
+            responseInterceptors.Remove(interceptor);
 
         // ======================== 核心发送方法 ========================
 
@@ -148,18 +204,34 @@ namespace VoyageForge.Bridge.Runtime
             //    历史上这里误用了配置的环境键（EnvironmentKey），导致 "不指定端点就请求失败"。
             string endpointKey = string.IsNullOrWhiteSpace(request.endpointKey) ? urlKey : request.endpointKey;
 
-            // 2. BaseURL：相对路径拼接所选端点的 baseUrl；
+            // 2. 先确保配置已加载：首次请求会在这里触发一次异步加载。
+            //    配置改成异步加载后必须 await，不能同步阻塞等待（.Result / .GetAwaiter().GetResult()），
+            //    否则 Android/WebGL 上会卡死主线程。
+            var config = await GetConfigAsync();
+            if (config == null)
+            {
+                OnError?.Invoke("[Bridge] 配置加载失败，请求已取消。");
+                return new Response<R>
+                {
+                    StatusCode = 0,
+                    StatusText = "ConfigUnavailable",
+                    Headers = new Dictionary<string, string>(),
+                    Data = null
+                };
+            }
+
+            // 3. BaseURL：相对路径拼接所选端点的 baseUrl；
             //    完整 URL（http 开头，忽略大小写）直接请求，不做任何拼接。
             if (!request.url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                request.url = Config.GetBaseUrl(endpointKey).TrimEnd('/') + "/" + request.url.TrimStart('/');
+                request.url = config.GetBaseUrl(endpointKey).TrimEnd('/') + "/" + request.url.TrimStart('/');
 
-            // 3. Headers：请求头为空则新建，再把全局默认头补齐（同名不覆盖请求自身设置的值）。
+            // 4. Headers：请求头为空则新建，再把全局默认头补齐（同名不覆盖请求自身设置的值）。
             request.headers ??= new Dictionary<string, string>();
             foreach (var kv in DefaultHeaders)
                 if (!request.headers.ContainsKey(kv.Key))
                     request.headers[kv.Key] = kv.Value;
 
-            // 4. 请求拦截器：可修改 URL、方法、请求体、请求头等。
+            // 5. 请求拦截器：可修改 URL、方法、请求体、请求头等。
             //    拦截器返回 null 时保留当前请求对象，避免链路被意外中断。
             foreach (var interceptor in requestInterceptors)
             {
@@ -167,7 +239,7 @@ namespace VoyageForge.Bridge.Runtime
                 request = interceptor.Invoke(request) ?? request;
             }
 
-            // 5. 创建并填充 UnityWebRequest。
+            // 6. 创建并填充 UnityWebRequest。
             using var uwr = new UnityWebRequest(request.url, request.method);
             uwr.downloadHandler = new DownloadHandlerBuffer();
 
@@ -189,7 +261,7 @@ namespace VoyageForge.Bridge.Runtime
                     uwr.SetRequestHeader(kv.Key, kv.Value);
             }
 
-            // 6. 发送并捕获所有异常（超时、取消、网络错误等），统一归一化为失败响应。
+            // 7. 发送并捕获所有异常（超时、取消、网络错误等），统一归一化为失败响应。
             try
             {
                 await uwr.SendWebRequest().ToUniTask(cancellationToken: request.cancellationToken);
@@ -217,7 +289,7 @@ namespace VoyageForge.Bridge.Runtime
                 return errorResponse;
             }
 
-            // 7. 构造响应容器；非 Success 结果直接返回（不执行响应拦截器）。
+            // 8. 构造响应容器；非 Success 结果直接返回（不执行响应拦截器）。
             var response = new Response<R>
             {
                 StatusCode = (HttpStatusCode)uwr.responseCode,
@@ -231,12 +303,12 @@ namespace VoyageForge.Bridge.Runtime
                 return response;
             }
 
-            // 8. 成功响应：保留原始文本并反序列化为 R。
+            // 9. 成功响应：保留原始文本并反序列化为 R。
             string responseText = uwr.downloadHandler.text;
             response.RawText = responseText;
             response.Data = DeserializeBody<R>(responseText);
 
-            // 9. 响应拦截器：其修改会回写到最终响应（见方法注释）。
+            // 10. 响应拦截器：其修改会回写到最终响应（见方法注释）。
             ApplyResponseInterceptors(response, responseText);
 
             return response;
@@ -333,7 +405,8 @@ namespace VoyageForge.Bridge.Runtime
             Dictionary<string, string> headers = null, int timeoutSeconds = 30,
             CancellationToken cancellationToken = default) where R : class
         {
-            var req = BridgeRequestFactory.Create(url, "GET", null, headers, timeoutSeconds, cancellationToken, endpointKey);
+            var req = BridgeRequestFactory.Create(url, "GET", null, headers, timeoutSeconds, cancellationToken,
+                endpointKey);
             return Instance.SendCoreAsync<R>(req);
         }
 
@@ -351,7 +424,8 @@ namespace VoyageForge.Bridge.Runtime
             Dictionary<string, string> headers = null, int timeoutSeconds = 30,
             CancellationToken cancellationToken = default) where R : class
         {
-            var req = BridgeRequestFactory.Create(url, "POST", bodyJson, headers, timeoutSeconds, cancellationToken, endpointKey);
+            var req = BridgeRequestFactory.Create(url, "POST", bodyJson, headers, timeoutSeconds, cancellationToken,
+                endpointKey);
             return Instance.SendCoreAsync<R>(req);
         }
 
@@ -369,7 +443,8 @@ namespace VoyageForge.Bridge.Runtime
             Dictionary<string, string> headers = null, int timeoutSeconds = 30,
             CancellationToken cancellationToken = default) where R : class
         {
-            var req = BridgeRequestFactory.Create(url, "PUT", bodyJson, headers, timeoutSeconds, cancellationToken, endpointKey);
+            var req = BridgeRequestFactory.Create(url, "PUT", bodyJson, headers, timeoutSeconds, cancellationToken,
+                endpointKey);
             return Instance.SendCoreAsync<R>(req);
         }
 
@@ -386,7 +461,8 @@ namespace VoyageForge.Bridge.Runtime
             Dictionary<string, string> headers = null, int timeoutSeconds = 30,
             CancellationToken cancellationToken = default) where R : class
         {
-            var req = BridgeRequestFactory.Create(url, "DELETE", null, headers, timeoutSeconds, cancellationToken, endpointKey);
+            var req = BridgeRequestFactory.Create(url, "DELETE", null, headers, timeoutSeconds, cancellationToken,
+                endpointKey);
             return Instance.SendCoreAsync<R>(req);
         }
     }

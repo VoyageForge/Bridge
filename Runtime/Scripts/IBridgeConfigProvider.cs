@@ -1,4 +1,6 @@
-﻿namespace VoyageForge.Bridge.Runtime
+﻿using Cysharp.Threading.Tasks;
+
+namespace VoyageForge.Bridge.Runtime
 {
     /// <summary>
     /// Bridge 网络配置提供器接口。
@@ -11,7 +13,7 @@
         /// 加载网络配置对象。
         /// </summary>
         /// <returns>网络配置实例。</returns>
-        IBridgeConfig LoadConfig();
+        UniTask<IBridgeConfig> LoadConfig();
 
         /// <summary>
         /// 保存网络配置对象。
@@ -23,6 +25,6 @@
         /// 获取当前环境键。
         /// </summary>
         /// <returns>当前环境键。</returns>
-        string GetEnvironment(string key = null);
+        UniTask<string> GetEnvironment(string key = null);
     }
 }

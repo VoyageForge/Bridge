@@ -1,4 +1,5 @@
 using System;
+using Cysharp.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using VoyageForge.Bridge.Runtime;
@@ -69,8 +70,9 @@ namespace VoyageForge.Bridge.Editor
                         if (GUILayout.Button(buttonText, GUILayout.Height(28f)))
                         {
                             // 通过 IBridgeConfig 切换并由统一入口保存，保证写入正确的数据源。
+                            // Save 是异步的（提供器加载可能走 UnityWebRequest），这里是 UI 回调，fire-and-forget。
                             config.SetEnvironment(environmentKey);
-                            BridgeConfigEditorAccess.Save(config);
+                            BridgeConfigEditorAccess.Save(config).Forget();
 
                             Debug.Log($"Bridge 当前环境已切换为：{environmentKey}");
                             Close();

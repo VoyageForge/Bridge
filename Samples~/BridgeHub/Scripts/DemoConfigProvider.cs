@@ -1,4 +1,4 @@
-using System.Linq;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using VoyageForge.Bridge.Runtime;
 
@@ -22,21 +22,23 @@ namespace VoyageForge.Bridge.Sample.Hub
         private IBridgeConfig _cachedConfig;
 
         /// <summary>
-        /// 从 Resources 加载配置资源。
+        /// 异步从 Resources 加载配置资源。
+        /// 注意：Resources.LoadAsync&lt;T&gt; 返回非泛型的 ResourceRequest，
+        /// UniTask 扩展固定返回 UniTask&lt;UnityEngine.Object&gt;，需要显式转成 BridgeConfigAsset。
         /// </summary>
         /// <returns>配置实例；找不到资源时返回 null 并给出错误日志。</returns>
-        public IBridgeConfig LoadConfig()
+        public async UniTask<IBridgeConfig> LoadConfig()
         {
             if (_cachedConfig != null) return _cachedConfig;
 
-            var assets = Resources.LoadAll<BridgeConfigAsset>(ResourcesPath);
-            if (assets == null || assets.Length == 0)
+            var asset = await Resources.LoadAsync<BridgeConfigAsset>(ResourcesPath).ToUniTask() as BridgeConfigAsset;
+            if (asset == null)
             {
                 Debug.LogError($"[BridgeHubDemo] 未在 Resources 中找到配置资源：{ResourcesPath}");
                 return null;
             }
 
-            _cachedConfig = assets.First();
+            _cachedConfig = asset;
             return _cachedConfig;
         }
 
@@ -59,9 +61,9 @@ namespace VoyageForge.Bridge.Sample.Hub
         /// 返回当前环境键；配置缺失时回退到保底环境 dev。
         /// </summary>
         /// <param name="key">未使用，保留参数以兼容接口。</param>
-        public string GetEnvironment(string key = null)
+        public async UniTask<string> GetEnvironment(string key = null)
         {
-            var config = LoadConfig();
+            var config = await LoadConfig();
             return config != null ? config.EnvironmentKey : BridgeConfigAsset.ReservedEnvironmentKey;
         }
     }

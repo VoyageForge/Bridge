@@ -1,4 +1,5 @@
 using System.IO;
+using Cysharp.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using VoyageForge.Bridge.Runtime;
@@ -29,11 +30,11 @@ namespace VoyageForge.Bridge.Editor
         /// 优先使用 ProjectSettings 中选定的配置提供器；
         /// 未选择提供器、提供器创建失败或加载不到配置时，回退到 BridgeConfigAsset（必要时自动创建）。
         /// </summary>
-        public static IBridgeConfig GetOrCreateConfig()
+        public static async UniTask<IBridgeConfig> GetOrCreateConfig()
         {
             if (TryResolveProvider(out var provider))
             {
-                var config = provider.LoadConfig();
+                var config =await provider.LoadConfig();
                 if (config != null)
                 {
                     return config;
@@ -88,9 +89,11 @@ namespace VoyageForge.Bridge.Editor
         /// 保存配置。
         /// 数据源判定与 <see cref="GetOrCreateConfig"/> 完全一致，保证"读哪份就写哪份"；
         /// 若已选择提供器但提供器加载不出配置，则拒绝保存（宁可报错，也不要把资产数据写进 JSON 数据源）。
+        /// 注意：本方法为异步（UniTask）。提供器加载配置可能走 UnityWebRequest，
+        /// 在编辑器主线程上同步等待（.AsTask().Result）会死锁，因此调用方应 fire-and-forget（.Forget()）。
         /// </summary>
         /// <param name="config">要保存的配置对象。</param>
-        public static void Save(IBridgeConfig config)
+        public static async UniTask Save(IBridgeConfig config)
         {
             if (config == null)
             {
@@ -100,7 +103,8 @@ namespace VoyageForge.Bridge.Editor
             if (TryResolveProvider(out var provider))
             {
                 // 提供器可用性校验：加载不出配置说明数据源当前不可用，此时保存会造成数据源错位。
-                if (provider.LoadConfig() == null)
+                var loaded = await provider.LoadConfig();
+                if (loaded == null)
                 {
                     Debug.LogError(
                         $"[Bridge] 配置提供器 {BridgeSettings.instance.ConfigProviderTypeName} 无法加载配置，已取消保存。");

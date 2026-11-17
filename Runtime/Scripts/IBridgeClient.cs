@@ -13,9 +13,17 @@ namespace VoyageForge.Bridge.Runtime
     public interface IBridgeClient
     {
         /// <summary>
-        /// 当前使用的配置对象（环境与端点地址来源）。
+        /// 当前已缓存的配置对象（环境与端点地址来源）。
+        /// 配置采用异步加载，首次加载完成前该属性可能为 null；
+        /// 需要确保配置已就绪时请改用 <see cref="GetConfigAsync"/>。
         /// </summary>
         IBridgeConfig Config { get; }
+
+        /// <summary>
+        /// 获取配置对象；首次调用会触发异步加载并缓存结果，后续调用直接返回缓存。
+        /// 加载失败时返回 null，不会抛异常。
+        /// </summary>
+        UniTask<IBridgeConfig> GetConfigAsync();
 
         /// <summary>
         /// 默认端点键：请求未显式指定 <see cref="Request.endpointKey"/> 时使用它。

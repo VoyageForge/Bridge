@@ -59,7 +59,11 @@ namespace VoyageForge.Bridge.Tests
             Assert.IsTrue(BridgeHub.HasClient, "客户端首次实例化时应自动登记到 BridgeHub");
             Assert.IsNotNull(BridgeHub.Current);
             Assert.AreEqual("default", BridgeHub.Current.DefaultEndpointKey);
-            Assert.IsInstanceOf<TestBridgeConfig>(BridgeHub.Current.Config, "门面应能读到该客户端的配置对象");
+
+            // 配置已改为异步加载，这里显式取一次；TestBridgeConfigProvider 返回的是已完成的 UniTask，
+            // 同步等待不会死锁，可以安全断言门面读到的配置对象类型。
+            var config = TestAutoRegisterBridgeClient.Instance.GetConfigAsync().GetAwaiter().GetResult();
+            Assert.IsInstanceOf<TestBridgeConfig>(config, "门面应能读到该客户端的配置对象");
         }
 
         /// <summary>

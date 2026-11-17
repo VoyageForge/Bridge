@@ -1,8 +1,7 @@
 using Cysharp.Threading.Tasks;
 using UnityEngine;
-using VoyageForge.Bridge.Runtime;
 
-namespace VoyageForge.Bridge.Sample
+namespace VoyageForge.Bridge.Runtime
 {
     /// <summary>
     /// 从 Resources 中加载网络配置的默认提供器。
@@ -10,6 +9,9 @@ namespace VoyageForge.Bridge.Sample
     ///
     /// 平台说明：Resources 在 PC / Android / WebGL 上都能用，
     /// 但同步的 Resources.Load 会阻塞主线程；这里统一用 Resources.LoadAsync 分帧加载。
+    ///
+    /// 说明：本类原本位于 Samples~ 示例目录（该目录不参与编译），
+    /// 现移入 Runtime 作为正式可选实现，便于直接使用与测试。
     /// </summary>
     public class ResourcesBridgeConfigProvider : IBridgeConfigProvider
     {

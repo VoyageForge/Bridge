@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -37,6 +39,12 @@ namespace VoyageForge.Bridge.Tests
 
         /// <summary>后台接受连接与处理请求的任务。</summary>
         private readonly Task _loop;
+
+        /// <summary>
+        /// 当前仍在处理的连接任务。
+        /// Dispose 时等待它们结束，避免端口被系统快速复用后，旧连接还在写响应而干扰后续测试的耗时测量。
+        /// </summary>
+        private readonly List<Task> _activeConnections = new();
 
         /// <summary>本服务器监听的端口（随机分配，避免与其它测试冲突）。</summary>
         public int Port { get; }
@@ -83,7 +91,14 @@ namespace VoyageForge.Bridge.Tests
                     return; // 监听已停止（Dispose）或发生致命错误
                 }
 
-                _ = Task.Run(() => ServeOneAsync(client, token), token);
+                Task serveTask = Task.Run(() => ServeOneAsync(client, token), token);
+
+                lock (_activeConnections)
+                {
+                    // 顺带清理已完成的任务，避免列表无限增长。
+                    _activeConnections.RemoveAll(item => item.IsCompleted);
+                    _activeConnections.Add(serveTask);
+                }
             }
         }
 
@@ -133,6 +148,21 @@ namespace VoyageForge.Bridge.Tests
             try { _listener.Stop(); } catch { }
 
             try { _loop.Wait(TimeSpan.FromSeconds(2)); } catch { }
+
+            // 等所有连接任务真正结束：否则端口可能被系统立即复用，
+            // 旧连接还会往已关闭的 socket 写响应，从而干扰后续用例的耗时测量。
+            Task[] pending;
+            lock (_activeConnections)
+            {
+                pending = _activeConnections.Where(item => !item.IsCompleted).ToArray();
+            }
+
+            try { Task.WaitAll(pending, TimeSpan.FromSeconds(3)); } catch { }
+
+            lock (_activeConnections)
+            {
+                _activeConnections.Clear();
+            }
 
             _cts.Dispose();
         }
